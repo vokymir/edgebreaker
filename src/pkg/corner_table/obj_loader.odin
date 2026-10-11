@@ -106,7 +106,7 @@ process_vertex :: proc(line: string, ct: ^Corner_Table) -> (ok := false) {
 	y := strconv.parse_f32(tokens[2]) or_return
 	z := strconv.parse_f32(tokens[3]) or_return
 
-	append(&ct.g, Vec3{x / w, y / w, z / w})
+	append(&ct.geometry, Vec3{x / w, y / w, z / w})
 
 	ok = true
 	return
@@ -137,7 +137,7 @@ process_face :: proc(line: string, ct: ^Corner_Table) -> (ok := false) {
 		v2 := parse_face_vertex(tokens[i - 1]) or_return
 		v3 := parse_face_vertex(tokens[i]) or_return
 
-		append(&ct.v, v1, v2, v3)
+		append(&ct.vertices, v1, v2, v3)
 	}
 
 	ok = true
@@ -184,13 +184,13 @@ build_topology :: proc(
 	allocator := context.allocator,
 	loc := #caller_location,
 ) {
-	num_corners := len(ct.v)
-	num_vertices := len(ct.g)
+	num_corners := len(ct.vertices)
+	num_vertices := len(ct.geometry)
 
-	resize(&ct.o, num_corners, loc)
-	slice.fill(ct.o[:], INVALID_CORNER)
+	resize(&ct.opposites, num_corners, loc)
+	slice.fill(ct.opposites[:], INVALID_CORNER)
 
-	resize(&ct.v2c, num_vertices, loc)
+	resize(&ct.vertex_corners, num_vertices, loc)
 
 	Edge :: struct {
 		v1, v2: Vertex,
@@ -199,19 +199,19 @@ build_topology :: proc(
 	defer delete(edge_map)
 
 	for c in 0 ..< Corner(num_corners) {
-		v := ct.v[c]
-		v1 := ct.v[corner_next(c)]
-		v2 := ct.v[corner_prev(c)]
+		v := ct.vertices[c]
+		v1 := ct.vertices[next_corner(c)]
+		v2 := ct.vertices[prev_corner(c)]
 
 		// simply write-over anything, doesn't matter
-		ct.v2c[v] = c
+		ct.vertex_corners[v] = c
 
 		directed_edge := Edge{v1, v2}
 		opposite_edge := Edge{v2, v1}
 
 		if opp_corner, exists := edge_map[opposite_edge]; exists {
-			ct.o[c] = opp_corner
-			ct.o[opp_corner] = c
+			ct.opposites[c] = opp_corner
+			ct.opposites[opp_corner] = c
 			// be easy on memory
 			delete_key(&edge_map, opposite_edge)
 		} else {

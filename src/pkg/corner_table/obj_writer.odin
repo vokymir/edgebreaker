@@ -43,11 +43,11 @@ save_ct_to_obj :: proc(
 	s := strings.builder_make(allocator, loc)
 	defer strings.builder_destroy(&s)
 
-	for v in ct.g {
+	for v in ct.geometry {
 		fmt.sbprintln(&s, "v", v.x, v.y, v.z)
 	}
 
-	triplets := slice.reinterpret([][3]Vertex, ct.v[:])
+	triplets := slice.reinterpret([][3]Vertex, ct.vertices[:])
 	for t in triplets {
 		// +1 is important as .obj is 1-indexed
 		fmt.sbprintln(&s, "f", t[0] + 1, t[1] + 1, t[2] + 1)
