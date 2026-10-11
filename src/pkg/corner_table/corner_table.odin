@@ -180,14 +180,16 @@ main :: proc() {
 
 		fmt.print(len(ct.g), "\n")
 		fmt.print(len(ct.v), "\n")
+		save("tree.obj", ct^)
 	}
 
 	{
 		init(ct)
 		defer destroy(ct)
-		load("polyhedron.obj", ct)
+		load("tetrahedron.obj", ct)
 
 		fmt.print(len(ct.g), "\n")
 		fmt.print(len(ct.v), "\n")
+		save("tetra.obj", ct^)
 	}
 }

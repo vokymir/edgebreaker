@@ -6,7 +6,8 @@ import "core:strconv"
 import "core:strings"
 
 /* 
-Load graph stored on disk in <filepath> into memory represented via Corner_Table. 
+Load (triangle) mesh stored on disk in <filepath> into memory represented
+via Corner_Table. 
 
 Supported formats to load from:
 - [OBJ](https://en.wikipedia.org/wiki/Wavefront_.obj_file): only simple ones
