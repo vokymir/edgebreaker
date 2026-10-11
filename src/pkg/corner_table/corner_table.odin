@@ -10,17 +10,24 @@ INVALID_CORNER :: Corner(-1)
 Vertex :: distinct int
 
 Corner_Table :: struct {
-	g:   []Vec3, // geometry
-	v:   []Vertex, // is 3T long, every 3 V are one T
-	o:   []Corner, // opposites
-	v2c: []Corner, // one corner for every vertex
+	g:   [dynamic]Vec3, // geometry
+	v:   [dynamic]Vertex, // is 3T long, every 3 V are one T
+	o:   [dynamic]Corner, // opposites
+	v2c: [dynamic]Corner, // one corner for every vertex
 }
 
-destroy :: proc(ct: ^Corner_Table) {
-	delete(ct.g)
-	delete(ct.v)
-	delete(ct.o)
-	delete(ct.v2c)
+init :: proc(ct: ^Corner_Table, allocator := context.allocator, loc := #caller_location) {
+	ct.g = make([dynamic]Vec3, allocator, loc)
+	ct.v = make([dynamic]Vertex, allocator, loc)
+	ct.o = make([dynamic]Corner, allocator, loc)
+	ct.v2c = make([dynamic]Corner, allocator, loc)
+}
+
+destroy :: proc(ct: ^Corner_Table, loc := #caller_location) {
+	delete(ct.g, loc)
+	delete(ct.v, loc)
+	delete(ct.o, loc)
+	delete(ct.v2c, loc)
 }
 
 // =====
