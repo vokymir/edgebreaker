@@ -177,8 +177,8 @@ all holes.
 vertex_is_on_boundary :: proc(ct: Corner_Table, v: Vertex) -> bool {
 	// the same logic with only small additional allocation, is not worth logic
 	// duplication
-	_, isnt_on_boundary := boundary_corner_of_vertex(ct, v)
-	return !isnt_on_boundary
+	_, found := boundary_corner_of_vertex(ct, v)
+	return found
 }
 
 /*

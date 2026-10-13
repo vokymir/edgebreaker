@@ -10,7 +10,6 @@ Print_Handler := Encoder_Stream_Handler {
 
 
 handle_as_print :: proc(user_data: rawptr, event: Encoder_Event) {
-	fmt.println("I am handling!")
 	switch event.op {
 	case .C:
 		fmt.println("C", event.data.(C_Operation_Data).vertex_delta)

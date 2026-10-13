@@ -2,6 +2,7 @@ package edgebreaker
 
 import ct "../corner_table"
 import "base:runtime"
+import "core:log"
 
 C_Operation_Data :: struct {
 	vertex_delta: Vec3,
@@ -78,6 +79,10 @@ init_es :: proc(
 	es.next_boundary = make([]ct.Corner, 3 * n_triangles, allocator, loc)
 	es.prev_boundary = make([]ct.Corner, 3 * n_triangles, allocator, loc)
 	// TODO: maybe do gate_stack, but maybe it is already initialized
+
+	es.handler = handler
+	es.predictor = predictor
+	es.allocator = allocator
 }
 
 Operation :: enum {
@@ -115,6 +120,7 @@ compress_ct :: proc(t: ct.Corner_Table, es: ^Encoder_State) -> (ok := false) {
 	index, component_found := next_component(t, es.vertex_marks)
 
 	for component_found {
+		log.debug("component found")
 		//     v
 		//   /  \
 		// gs----ge
@@ -127,6 +133,7 @@ compress_ct :: proc(t: ct.Corner_Table, es: ^Encoder_State) -> (ok := false) {
 		// special case for open-meshes: must find boundary
 		// TODO: extract to special procedure
 		if ct.vertex_is_on_boundary(t, ct.Vertex(index)) {
+			log.debug("has boundary")
 			// find all boundary edges, mark as visited and emit
 			// start with the gate end, as specified in paper
 
@@ -134,6 +141,7 @@ compress_ct :: proc(t: ct.Corner_Table, es: ^Encoder_State) -> (ok := false) {
 			current := initial
 			next, found := ct.next_boundary_vertex(t, current)
 			if !found {
+				log.debug("invalid mesh")
 				return //invalid mesh
 			}
 
@@ -192,9 +200,11 @@ compress_ct :: proc(t: ct.Corner_Table, es: ^Encoder_State) -> (ok := false) {
 
 C :: proc(v: ct.Corner, t: ct.Corner_Table, es: ^Encoder_State) -> ct.Corner {
 	// calculate correction to prediction of next vertex
-	o_pos := ct.corner_position(t, ct.opposite_corner(t, v))
+	o_pos: Vec3
 	if v == ct.INVALID_CORNER {
 		o_pos = {0, 0, 0}
+	} else {
+		o_pos = ct.corner_position(t, ct.opposite_corner(t, v))
 	}
 	gs_pos := ct.corner_position(t, ct.next_corner(v))
 	ge_pos := ct.corner_position(t, ct.prev_corner(v))

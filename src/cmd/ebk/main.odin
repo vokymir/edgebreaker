@@ -4,6 +4,7 @@ import ct "../../pkg/corner_table"
 import eb "../../pkg/edgebreaker"
 import "core:flags"
 import "core:fmt"
+import "core:log"
 import "core:os"
 import "core:path/filepath"
 
@@ -25,6 +26,7 @@ Options :: struct {
 }
 
 main :: proc() {
+	context.logger = log.create_console_logger()
 	opt: Options
 	flags.parse_or_exit(&opt, os.args)
 
@@ -34,6 +36,7 @@ main :: proc() {
 		table: ct.Corner_Table
 		ct.init(&table)
 		ct.load(opt.input, &table)
+		ct.save(opt.output, table)
 
 		fmt.println("compressing")
 		es: eb.Encoder_State
