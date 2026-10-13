@@ -8,6 +8,7 @@ Corner :: distinct int
 INVALID_CORNER :: Corner(-1)
 
 Vertex :: distinct int
+INVALID_VERTEX :: Vertex(-1)
 
 /*
 Represents a triangle mesh in a corner table.
@@ -52,8 +53,7 @@ destroy :: proc(ct: ^Corner_Table, loc := #caller_location) {
 	delete(ct.vertex_corners, loc)
 }
 
-// =====
-// BASIC INFO RETRIEVAL
+/****************************** Basic Info Retrieval **************************/
 
 // return some corner belonging to the vertex
 corner_of_vertex :: #force_inline proc(ct: Corner_Table, v: Vertex) -> Corner {
@@ -75,8 +75,7 @@ corner_position :: #force_inline proc(ct: Corner_Table, c: Corner) -> Vec3 {
 	return ct.geometry[vertex_of_corner(ct, c)]
 }
 
-// =====
-// BASIC MOVEMENT
+/****************************** Basic Traversal *******************************/
 
 // returns the next corner in the same triangle (counter-clockwise)
 next_corner :: #force_inline proc(c: Corner) -> Corner {
@@ -113,8 +112,7 @@ left_corner :: #force_inline proc(ct: Corner_Table, c: Corner) -> Corner {
 	return next_corner(op)
 }
 
-// =====
-// INCIDENCE QUERIES
+/****************************** Incidence Queries *****************************/
 
 /*
 Vertex-Corners Query: 
@@ -167,5 +165,61 @@ vertex_corners_query :: proc(
 		append(corners, current, loc)
 	}
 
+	return
+}
+
+/*
+May be useful for edgebreaker pre-processing & finding the initial boundary and
+all holes.
+*/
+vertex_is_on_boundary :: proc(ct: Corner_Table, v: Vertex) -> bool {
+	initial := corner_of_vertex(ct, v)
+	if initial == INVALID_CORNER {return true}
+	current := initial
+
+	// start traversal of corners to the right
+	for {
+		current = right_corner(ct, current)
+		if current == initial {
+			return false // full-circle => not boundary
+		}
+		if current == INVALID_CORNER {
+			return true
+		}
+	}
+}
+
+
+/*
+May be useful for edgebreaker pre-processing & finding the initial boundary and
+all holes.
+*/
+get_next_boundary_vertex :: proc(
+	ct: Corner_Table,
+	v: Vertex,
+) -> (
+	v_next := INVALID_VERTEX,
+	found := false,
+) {
+
+	initial := corner_of_vertex(ct, v)
+	if initial == INVALID_CORNER {return}
+	current := initial
+	next := current
+
+	// start traversal of corners to the right
+	for {
+		next = right_corner(ct, current)
+		if next == initial {
+			return // v is not a boundary vertex
+		}
+		if next == INVALID_CORNER {
+			break // found & stored in current
+		}
+		current = next
+	}
+
+	v_next = vertex_of_corner(ct, next_corner(current))
+	found = true
 	return
 }
