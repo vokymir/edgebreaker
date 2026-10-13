@@ -93,6 +93,7 @@ opposite_corner :: #force_inline proc(ct: Corner_Table, c: Corner) -> Corner {
 }
 
 // return corner incident with the same vertex, but on the right of c
+// (clock-wise)
 right_corner :: #force_inline proc(ct: Corner_Table, c: Corner) -> Corner {
 	prev := prev_corner(c)
 	op := opposite_corner(ct, prev)
@@ -103,6 +104,7 @@ right_corner :: #force_inline proc(ct: Corner_Table, c: Corner) -> Corner {
 }
 
 // return corner incident with the same vertex, but on the left of c
+// (clock-wise)
 left_corner :: #force_inline proc(ct: Corner_Table, c: Corner) -> Corner {
 	next := next_corner(c)
 	op := opposite_corner(ct, next)
@@ -169,23 +171,44 @@ vertex_corners_query :: proc(
 }
 
 /*
-May be useful for edgebreaker pre-processing & finding the initial boundary and
+Is useful for edgebreaker pre-processing & finding the initial boundary and
 all holes.
 */
 vertex_is_on_boundary :: proc(ct: Corner_Table, v: Vertex) -> bool {
+	// the same logic with only small additional allocation, is not worth logic
+	// duplication
+	_, isnt_on_boundary := boundary_corner_of_vertex(ct, v)
+	return !isnt_on_boundary
+}
+
+/*
+Returns:
+- c: corner for which the right_corner() returns INVALID_CORNER, ie right-most
+corner (clock-wise)
+- found: if not on boundary, return false
+*/
+boundary_corner_of_vertex :: proc(
+	ct: Corner_Table,
+	v: Vertex,
+) -> (
+	c := INVALID_CORNER,
+	found := false,
+) {
 	initial := corner_of_vertex(ct, v)
-	if initial == INVALID_CORNER {return true}
+	if initial == INVALID_CORNER {return}
 	current := initial
+	next := current
 
 	// start traversal of corners to the right
 	for {
-		current = right_corner(ct, current)
-		if current == initial {
-			return false // full-circle => not boundary
+		next = right_corner(ct, current)
+		if next == initial {
+			return // full-circle => not boundary
 		}
-		if current == INVALID_CORNER {
-			return true
+		if next == INVALID_CORNER {
+			return current, true
 		}
+		current = next
 	}
 }
 
@@ -194,7 +217,7 @@ vertex_is_on_boundary :: proc(ct: Corner_Table, v: Vertex) -> bool {
 May be useful for edgebreaker pre-processing & finding the initial boundary and
 all holes.
 */
-get_next_boundary_vertex :: proc(
+next_boundary_vertex :: proc(
 	ct: Corner_Table,
 	v: Vertex,
 ) -> (
