@@ -217,19 +217,121 @@ C :: proc(v: ct.Corner, t: ct.Corner_Table, es: ^Encoder_State) -> ct.Corner {
 }
 
 L :: proc(v: ct.Corner, t: ct.Corner_Table, es: ^Encoder_State) -> ct.Corner {
+	// rewire boundary edges
+	prev_b, _ := prev_on_boundary(v, t, es^)
+	next_b, _ := next_on_boundary(v, t, es^)
+	prev_prev_b, _ := prev_on_boundary(prev_b, t, es^)
+
+	new_b := ct.opposite_corner(t, ct.next_corner(v))
+
+	// prev_b is now not in boundary
+	es.next_boundary[prev_b] = ct.INVALID_CORNER
+	es.prev_boundary[prev_b] = ct.INVALID_CORNER
+
+	// new boundary is in the middle of prev_prev & next
+	es.next_boundary[new_b] = next_b
+	es.prev_boundary[new_b] = prev_prev_b
+
+	es.next_boundary[prev_prev_b] = new_b
+	es.prev_boundary[next_b] = new_b
+
+	new_gs := ct.left_corner(t, v)
+	emit_step(es, {op = .L, data = L_Operation_Data{}})
+
+	return new_gs
+}
+
+R :: proc(v: ct.Corner, t: ct.Corner_Table, es: ^Encoder_State) -> ct.Corner {
+	// rewire boundary edges
+	prev_b, _ := prev_on_boundary(v, t, es^)
+	next_b, _ := next_on_boundary(v, t, es^)
+	next_next_b, _ := next_on_boundary(next_b, t, es^)
+
+	new_b := ct.opposite_corner(t, ct.prev_corner(v))
+
+	// next_b is now not in boundary
+	es.next_boundary[next_b] = ct.INVALID_CORNER
+	es.prev_boundary[next_b] = ct.INVALID_CORNER
+
+	// new boundary is in the middle of prev & next_next
+	es.next_boundary[new_b] = next_next_b
+	es.prev_boundary[new_b] = prev_b
+
+	es.next_boundary[prev_b] = new_b
+	es.prev_boundary[next_next_b] = new_b
+
+	new_gs := ct.left_corner(t, v)
+	emit_step(es, {op = .R, data = R_Operation_Data{}})
+
+	return new_gs
+}
+
+/*
+   C    F      v is the corner "under" B, ie D--G
+ /  \ /  \     all other corners/edges will there be referenced
+A -- B -- E    by their vertices LETTERS - orientation may be
+ \  /x\  /     induced as every triangle is counter clock-wise oriented
+  D -- G
+*/
+S :: proc(v: ct.Corner, t: ct.Corner_Table, es: ^Encoder_State) -> ct.Corner {
+	// find all needed edges
+	dg := v
+	// find the boundary edge on the other side of new vertex
+	fb, _ := next_on_boundary(dg, t, es^)
+	for ct.vertex_of_corner(t, dg) != ct.vertex_of_corner(t, ct.next_corner(fb)) {
+		fb, _ = next_on_boundary(fb, t, es^)
+	}
+	bc, _ := next_on_boundary(fb, t, es^)
+
+	ad, _ := prev_on_boundary(dg, t, es^)
+	ge, _ := next_on_boundary(dg, t, es^)
+	db := ct.opposite_corner(t, ct.prev_corner(dg))
+	bg := ct.opposite_corner(t, ct.next_corner(dg))
+
+	// rewire the right side (where now we continue)
+	es.next_boundary[fb] = bg
+	es.next_boundary[bg] = ge
+	es.prev_boundary[ge] = bg
+	es.prev_boundary[bg] = fb
+
+	// rewire the left side
+	es.next_boundary[ad] = db
+	es.next_boundary[db] = bc
+	es.prev_boundary[bc] = db
+	es.prev_boundary[db] = ad
+
+	// break the dg edge (hehe, edgebreaker)
+	es.next_boundary[dg] = ct.INVALID_CORNER
+	es.prev_boundary[dg] = ct.INVALID_CORNER
+
+	// push the left edge on gate_stack
+	append(&es.gate_stack, db)
+
+	emit_step(es, {op = .S, data = S_Operation_Data{}})
 	return -1
 }
 
 E :: proc(v: ct.Corner, t: ct.Corner_Table, es: ^Encoder_State) -> ct.Corner {
-	return -1
-}
+	prev_b, _ := prev_on_boundary(v, t, es^)
+	next_b, _ := next_on_boundary(v, t, es^)
 
-R :: proc(v: ct.Corner, t: ct.Corner_Table, es: ^Encoder_State) -> ct.Corner {
-	return -1
-}
+	es.next_boundary[prev_b] = ct.INVALID_CORNER
+	es.next_boundary[v] = ct.INVALID_CORNER
+	es.next_boundary[next_b] = ct.INVALID_CORNER
 
-S :: proc(v: ct.Corner, t: ct.Corner_Table, es: ^Encoder_State) -> ct.Corner {
-	return -1
+	es.prev_boundary[prev_b] = ct.INVALID_CORNER
+	es.prev_boundary[v] = ct.INVALID_CORNER
+	es.prev_boundary[next_b] = ct.INVALID_CORNER
+
+	emit_step(es, {op = .E, data = E_Operation_Data{}})
+
+	if len(es.gate_stack) <= 0 {
+		return ct.INVALID_CORNER // absolute end of component
+	}
+
+	new_gs := pop(&es.gate_stack)
+
+	return new_gs
 }
 
 /****************************** Traversal helpers *****************************/
@@ -238,6 +340,8 @@ S :: proc(v: ct.Corner, t: ct.Corner_Table, es: ^Encoder_State) -> ct.Corner {
 Complexity:
 - O(n): For existing open-meshes it might be less than n, for closed meshes it
 is always n.
+TODO: split into two independent searches, so first it looks for boundaries,
+second not for and in total it would be 2n steps, not k*n where k~= # components
 
 Returns:
 - index: Index in marks of the first found component. If the component is open,
@@ -289,8 +393,7 @@ is_next_on_boundary :: proc(c1, c2: ct.Corner, t: ct.Corner_Table, es: Encoder_S
 }
 
 /*
-Find the next (right) vertex on the current edgebreaker boundary.
-MUST handle init case = all vertices are unvisited, so must choose one from that
+Find the next (right, anti-clockwise) vertex on the current edgebreaker boundary.
 */
 next_on_boundary :: proc(
 	c: ct.Corner,
