@@ -38,7 +38,6 @@ Encoder_Stream_Handler :: struct {
 	user_data: rawptr,
 	on_event:  Encoder_Event_Proc,
 }
-// TODO: init/destroy ESH
 
 emit_step :: proc(state: ^Encoder_State, event: Encoder_Event) {
 	if state.handler.on_event != nil {
@@ -67,6 +66,19 @@ Encoder_State :: struct {
 }
 
 // TODO: init/destroy ES
+init_es :: proc(
+	es: ^Encoder_State,
+	n_vertices, n_triangles: int,
+	handler := Print_Handler,
+	predictor := Predictor_None,
+	allocator := context.allocator,
+	loc := #caller_location,
+) {
+	es.vertex_marks = make([]Mark, n_vertices, allocator, loc)
+	es.next_boundary = make([]ct.Corner, 3 * n_triangles, allocator, loc)
+	es.prev_boundary = make([]ct.Corner, 3 * n_triangles, allocator, loc)
+	// TODO: maybe do gate_stack, but maybe it is already initialized
+}
 
 Operation :: enum {
 	C, // create
