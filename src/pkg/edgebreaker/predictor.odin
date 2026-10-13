@@ -4,6 +4,20 @@ import "../corner_table"
 
 Vec3 :: corner_table.Vec3
 
+/********************************* POSSIBLE PREDICTORS ************************/
+
+Predictor_None :: Predictor {
+	kind    = .NONE,
+	predict = predict_none,
+}
+
+Predictor_Parallelogram :: Predictor {
+	kind    = .PARALLELOGRAM,
+	predict = predict_parallelogram,
+}
+
+/**************************** STRUCTS *****************************************/
+
 Predictor_Kind :: enum {
 	NONE,
 	PARALLELOGRAM,
@@ -30,6 +44,8 @@ Predictor :: struct {
 	kind:    Predictor_Kind,
 	predict: Predictor_Proc,
 }
+
+/******************************* IMPLEMENTATIONS ******************************/
 
 /*
 Always predict {0,0,0} therefore the correction/delta must be the absolute 
