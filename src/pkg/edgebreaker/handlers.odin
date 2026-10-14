@@ -51,7 +51,7 @@ R_Data :: struct {}
 S_Data :: struct {}
 E_Data :: struct {}
 
-// initializing edgebreaker with boundary vertices
+// initializing edgebreaker phase on mesh with boundary with boundary vertices
 Boundary_Data :: struct {
 	vertex_position: Vec3,
 }
@@ -76,7 +76,7 @@ Operation_Data :: union {
 handle_as_print :: proc(user_data: rawptr, event: Encoder_Event) {
 	switch event.op {
 	case .C:
-		fmt.println("C", event.data.(C_Operation_Data).vertex_delta)
+		fmt.println("C", event.data.(C_Data).vertex_delta)
 	case .L:
 		fmt.println("L")
 	case .E:
@@ -86,7 +86,7 @@ handle_as_print :: proc(user_data: rawptr, event: Encoder_Event) {
 	case .S:
 		fmt.println("S")
 	case .BOUNDARY_VERTEX:
-		fmt.println("Boundary Vertex:", event.data.(B_Operation_Data).vertex_position)
+		fmt.println("Boundary Vertex:", event.data.(Boundary_Data).vertex_position)
 	case .INITIAL_TRIANGLE:
 		data := event.data.(Init_Triangle_Data)
 		fmt.println("Initial Triangle:", data.gs, data.ge, data.v)
