@@ -3,6 +3,7 @@ package edgebreaker
 import ct "../corner_table"
 import "base:runtime"
 import "core:log"
+import "core:slice"
 import "core:time"
 
 C_Operation_Data :: struct {
@@ -20,6 +21,10 @@ B_Operation_Data :: struct {
 	vertex_position: Vec3,
 }
 
+Init_Triangle_Operation_Data :: struct {
+	gs, ge, v: Vec3,
+}
+
 Operation_Data :: union {
 	C_Operation_Data,
 	L_Operation_Data,
@@ -27,6 +32,7 @@ Operation_Data :: union {
 	R_Operation_Data,
 	S_Operation_Data,
 	B_Operation_Data,
+	Init_Triangle_Operation_Data,
 }
 
 Encoder_Event :: struct {
@@ -77,9 +83,12 @@ init_es :: proc(
 	loc := #caller_location,
 ) {
 	es.vertex_marks = make([]Mark, n_vertices, allocator, loc)
+	slice.fill(es.vertex_marks[:], Mark.NOT_VISITED)
 	es.next_boundary = make([]ct.Corner, 3 * n_triangles, allocator, loc)
+	slice.fill(es.next_boundary[:], ct.INVALID_CORNER)
 	es.prev_boundary = make([]ct.Corner, 3 * n_triangles, allocator, loc)
-	// TODO: maybe do gate_stack, but maybe it is already initialized
+	slice.fill(es.prev_boundary[:], ct.INVALID_CORNER)
+	es.gate_stack = make([dynamic]ct.Corner, allocator, loc)
 
 	es.handler = handler
 	es.predictor = predictor
@@ -93,6 +102,7 @@ Operation :: enum {
 	S, // split
 	E, // end
 	BOUNDARY_VERTEX, // emitting boundary vertex
+	INITIAL_TRIANGLE,
 }
 
 /*
@@ -118,7 +128,7 @@ compress_ct :: proc(t: ct.Corner_Table, es: ^Encoder_State) -> (ok := false) {
 	//     perform CLERS operation, ie maybe modifying current vertex in the process
 	//     & marking vertices and/or triangles
 
-	index, component_found := next_component(t, es.vertex_marks)
+	index, boundary_component, component_found := next_component(t, es.vertex_marks)
 
 	for component_found {
 		log.debug("component found")
@@ -143,7 +153,7 @@ compress_ct :: proc(t: ct.Corner_Table, es: ^Encoder_State) -> (ok := false) {
 
 		// special case for open-meshes: must find boundary
 		// TODO: extract to special procedure
-		if ct.vertex_is_on_boundary(t, ct.Vertex(index)) {
+		if boundary_component {
 			log.debug("has boundary")
 			// find all boundary edges, mark as visited and emit
 			// start with the gate end, as specified in paper
@@ -182,13 +192,15 @@ compress_ct :: proc(t: ct.Corner_Table, es: ^Encoder_State) -> (ok := false) {
 			}
 		}
 
-		es.vertex_marks[ct.vertex_of_corner(t, gs)] = .VISITED
-		es.vertex_marks[ct.vertex_of_corner(t, ge)] = .VISITED
+		gs = initial_triangle(ct.next_corner(ge), t, es)
+		ge, gate_exists = next_on_boundary(gs, t, es^)
 
 		for gate_exists {
+			log.debug("here")
 			v := ct.next_corner(ge)
 
 			time.sleep(2 * time.Second) // debug feature
+			log.debug("v mark:", es.vertex_marks[ct.vertex_of_corner(t, v)])
 			if es.vertex_marks[ct.vertex_of_corner(t, v)] == .NOT_VISITED {
 				gs = C(v, t, es)
 			} else if is_next_on_boundary(v, ge, t, es^) {
@@ -219,10 +231,89 @@ compress_ct :: proc(t: ct.Corner_Table, es: ^Encoder_State) -> (ok := false) {
 		} // while the current vertex is in any not visited triangle
 
 		// find another unvisited vertex, ie another mesh
-		index, component_found = next_component(t, es.vertex_marks)
+		index, boundary_component, component_found = next_component(
+			t,
+			es.vertex_marks,
+			index,
+			boundary_component,
+		)
 	}
 
 	return
+}
+
+
+/*
+  This is de-facto C, but emits only vertex positions.
+
+   C -- F      v is the corner "under" B, ie D--G is the gate
+ /  \ /  \     all other corners/edges will there be referenced
+A -- B -- E    by their vertices LETTERS - orientation may be
+ \  /x\  /     induced as every triangle is counter clock-wise oriented
+  D -- G       
+*/
+initial_triangle :: proc(v: ct.Corner, t: ct.Corner_Table, es: ^Encoder_State) -> ct.Corner {
+	dg := v
+	gb := ct.next_corner(dg)
+	bd := ct.prev_corner(dg)
+	D_pos := ct.corner_position(t, gb)
+	G_pos := ct.corner_position(t, bd)
+	B_pos := ct.corner_position(t, dg)
+
+	// update flags
+	es.vertex_marks[ct.vertex_of_corner(t, dg)] = .VISITED
+	es.vertex_marks[ct.vertex_of_corner(t, gb)] = .VISITED
+	es.vertex_marks[ct.vertex_of_corner(t, bd)] = .VISITED
+
+	bg := ct.opposite_corner(t, ct.next_corner(dg))
+	db := ct.opposite_corner(t, ct.prev_corner(dg))
+
+	// rewire boundary edges
+	// for bounded mesh
+	log.debug(dg, prev_on_boundary(dg, t, es^))
+	log.debug(es.prev_boundary)
+	if ad, bounded_mesh := prev_on_boundary(dg, t, es^); bounded_mesh {
+		log.debug("i am in bounded mesh")
+		ge, _ := next_on_boundary(dg, t, es^)
+
+		es.next_boundary[ad] = db
+		es.next_boundary[db] = bg
+		es.next_boundary[bg] = ge
+
+		es.prev_boundary[ge] = bg
+		es.prev_boundary[bg] = db
+		es.prev_boundary[db] = ad
+
+		es.next_boundary[dg] = ct.INVALID_CORNER
+		es.prev_boundary[dg] = ct.INVALID_CORNER
+
+	} else { 	// for closed mesh
+		log.debug("i am in closed mesh")
+		gd := ct.opposite_corner(t, dg)
+
+		es.next_boundary[gd] = bg
+		es.next_boundary[bg] = db
+		es.next_boundary[db] = gd
+
+		es.prev_boundary[gd] = db
+		es.prev_boundary[db] = bg
+		es.prev_boundary[bg] = gd
+		log.debug(es.next_boundary, es.prev_boundary)
+	}
+
+	// calculate the next gate
+	ge := ct.next_corner(ct.opposite_corner(t, gb))
+	new_gate_start := ge
+
+	emit_step(
+		es,
+		{
+			op = .INITIAL_TRIANGLE,
+			data = Init_Triangle_Operation_Data{gs = D_pos, ge = G_pos, v = B_pos},
+		},
+	)
+
+	return new_gate_start
 }
 
 /*
@@ -235,6 +326,7 @@ A -- B -- E    by their vertices LETTERS - orientation may be
     H          H completes the last visited triangle
 */
 C :: proc(v: ct.Corner, t: ct.Corner_Table, es: ^Encoder_State) -> ct.Corner {
+	log.debug("C")
 	dg := v
 	// calculate correction to prediction of next vertex
 	H_pos: Vec3
@@ -279,6 +371,7 @@ C :: proc(v: ct.Corner, t: ct.Corner_Table, es: ^Encoder_State) -> ct.Corner {
 }
 
 L :: proc(v: ct.Corner, t: ct.Corner_Table, es: ^Encoder_State) -> ct.Corner {
+	log.debug("L")
 	// rewire boundary edges
 	prev_b, _ := prev_on_boundary(v, t, es^)
 	next_b, _ := next_on_boundary(v, t, es^)
@@ -303,7 +396,15 @@ L :: proc(v: ct.Corner, t: ct.Corner_Table, es: ^Encoder_State) -> ct.Corner {
 	return new_gs
 }
 
+/*
+   C    F      v is the corner "under" B, ie D--G
+ /  \ /  \     all other corners/edges will there be referenced
+A -- B -- E    by their vertices LETTERS - orientation may be
+ \  /x\  /     induced as every triangle is counter clock-wise oriented
+  D -- G
+*/
 R :: proc(v: ct.Corner, t: ct.Corner_Table, es: ^Encoder_State) -> ct.Corner {
+	log.debug("R")
 	// rewire boundary edges
 	prev_b, _ := prev_on_boundary(v, t, es^)
 	next_b, _ := next_on_boundary(v, t, es^)
@@ -336,6 +437,8 @@ A -- B -- E    by their vertices LETTERS - orientation may be
   D -- G
 */
 S :: proc(v: ct.Corner, t: ct.Corner_Table, es: ^Encoder_State) -> ct.Corner {
+	log.debug("S")
+	log.debug(v, t, es)
 	// find all needed edges
 	dg := v
 	// find the boundary edge on the other side of new vertex
@@ -373,25 +476,31 @@ S :: proc(v: ct.Corner, t: ct.Corner_Table, es: ^Encoder_State) -> ct.Corner {
 	return bg
 }
 
+/*
+               v is the corner "under" B, ie D--G
+               all other corners/edges will there be referenced
+     B         by their vertices LETTERS - orientation may be
+    /x\        induced as every triangle is counter clock-wise oriented
+  D -- G
+
+*/
 E :: proc(v: ct.Corner, t: ct.Corner_Table, es: ^Encoder_State) -> ct.Corner {
-	prev_b, _ := prev_on_boundary(v, t, es^)
-	next_b, _ := next_on_boundary(v, t, es^)
+	log.debug("E")
+	dg := v
+	gb := ct.next_corner(dg)
+	bd := ct.prev_corner(dg)
 
-	es.next_boundary[prev_b] = ct.INVALID_CORNER
-	es.next_boundary[v] = ct.INVALID_CORNER
-	es.next_boundary[next_b] = ct.INVALID_CORNER
+	es.next_boundary[dg] = ct.INVALID_CORNER
+	es.next_boundary[gb] = ct.INVALID_CORNER
+	es.next_boundary[bd] = ct.INVALID_CORNER
 
-	es.prev_boundary[prev_b] = ct.INVALID_CORNER
-	es.prev_boundary[v] = ct.INVALID_CORNER
-	es.prev_boundary[next_b] = ct.INVALID_CORNER
+	es.prev_boundary[dg] = ct.INVALID_CORNER
+	es.prev_boundary[gb] = ct.INVALID_CORNER
+	es.prev_boundary[bd] = ct.INVALID_CORNER
 
 	emit_step(es, {op = .E, data = E_Operation_Data{}})
 
-	if len(es.gate_stack) <= 0 {
-		return ct.INVALID_CORNER // absolute end of component
-	}
-
-	new_gs := pop(&es.gate_stack)
+	new_gs := len(es.gate_stack) > 0 ? pop(&es.gate_stack) : ct.INVALID_CORNER
 
 	return new_gs
 }
@@ -404,33 +513,47 @@ Complexity:
 is always n.
 TODO: split into two independent searches, so first it looks for boundaries,
 second not for and in total it would be 2n steps, not k*n where k~= # components
+DONE; TODO: update this DOC comment
+TODO: make sane ordering of in-out args, so it is not wild west
 
 Returns:
 - index: Index in marks of the first found component. If the component is open,
 return index of vertex on boundary. If closed, returns first found index.
 */
-next_component :: proc(t: ct.Corner_Table, marks: []Mark) -> (index: int, found: bool) {
-	first_closed := max(int)
+next_component :: proc(
+	t: ct.Corner_Table,
+	marks: []Mark,
+	start := 0,
+	search_first_for_boundary := true,
+) -> (
+	index: int,
+	found_in_boundary: bool,
+	found: bool,
+) {
+	start := start
 
 	log.debug(marks)
-	for mark, i in marks {
-		if mark == .NOT_VISITED {
-			if first_closed > i {
-				first_closed = i
-			}
-			if ct.vertex_is_on_boundary(t, ct.Vertex(i)) {
+	if search_first_for_boundary {
+		for mark, i in marks[start:] {
+			if mark == .NOT_VISITED && ct.vertex_is_on_boundary(t, ct.Vertex(i)) {
 				log.debug("found on boundary:", i)
-				return i, true
+				return start + i, true, true
 			}
+		}
+		// not found on boundary, continue search in closed mesh
+		log.debug("not found on boundary")
+		start = 0
+	}
+
+	for mark, i in marks[start:] {
+		if mark == .NOT_VISITED {
+			log.debug("found in closed mesh")
+			return start + i, false, true
 		}
 	}
 
-	if first_closed > len(marks) {
-		log.debug("find nothing")
-		return -1, false
-	}
-	log.debug("found first closed:", first_closed)
-	return first_closed, true
+	log.debug("not found")
+	return -1, false, false
 }
 
 // find third vertex for given vertices, but return it as a corner
@@ -485,7 +608,7 @@ prev_on_boundary :: proc(
 	prev_c := ct.INVALID_CORNER,
 	found := false,
 ) {
-	if c < 0 || int(c) >= len(es.prev_boundary) {
+	if c == ct.INVALID_CORNER || c < 0 || int(c) >= len(es.prev_boundary) {
 		return
 	}
 

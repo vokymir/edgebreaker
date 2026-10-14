@@ -23,5 +23,8 @@ handle_as_print :: proc(user_data: rawptr, event: Encoder_Event) {
 		fmt.println("S")
 	case .BOUNDARY_VERTEX:
 		fmt.println("Boundary Vertex:", event.data.(B_Operation_Data).vertex_position)
+	case .INITIAL_TRIANGLE:
+		data := event.data.(Init_Triangle_Operation_Data)
+		fmt.println("Initial Triangle:", data.gs, data.ge, data.v)
 	}
 }
