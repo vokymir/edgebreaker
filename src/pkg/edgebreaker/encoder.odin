@@ -6,46 +6,6 @@ import "core:log"
 import "core:slice"
 import "core:time"
 
-C_Operation_Data :: struct {
-	vertex_delta: Vec3,
-}
-
-L_Operation_Data :: struct {}
-R_Operation_Data :: struct {}
-
-S_Operation_Data :: struct {}
-E_Operation_Data :: struct {}
-
-// initializing edgebreaker with boundary vertices
-B_Operation_Data :: struct {
-	vertex_position: Vec3,
-}
-
-Init_Triangle_Operation_Data :: struct {
-	gs, ge, v: Vec3,
-}
-
-Operation_Data :: union {
-	C_Operation_Data,
-	L_Operation_Data,
-	E_Operation_Data,
-	R_Operation_Data,
-	S_Operation_Data,
-	B_Operation_Data,
-	Init_Triangle_Operation_Data,
-}
-
-Encoder_Event :: struct {
-	op:   Operation,
-	data: Operation_Data,
-}
-
-Encoder_Event_Proc :: #type proc(user_data: rawptr, event: Encoder_Event)
-
-Encoder_Stream_Handler :: struct {
-	user_data: rawptr,
-	on_event:  Encoder_Event_Proc,
-}
 
 emit_step :: proc(state: ^Encoder_State, event: Encoder_Event) {
 	if state.handler.on_event != nil {
@@ -173,7 +133,7 @@ compress_ct :: proc(t: ct.Corner_Table, es: ^Encoder_State) -> (ok := false) {
 				pos := ct.corner_position(t, ct.corner_of_vertex(t, current))
 
 				// emit
-				emit_step(es, {op = .BOUNDARY_VERTEX, data = B_Operation_Data{pos}})
+				emit_step(es, {op = .BOUNDARY_VERTEX, data = Boundary_Data{pos}})
 
 				// store in lists
 				current_b := third_corner(current, next, t)
@@ -307,10 +267,7 @@ initial_triangle :: proc(v: ct.Corner, t: ct.Corner_Table, es: ^Encoder_State) -
 
 	emit_step(
 		es,
-		{
-			op = .INITIAL_TRIANGLE,
-			data = Init_Triangle_Operation_Data{gs = D_pos, ge = G_pos, v = B_pos},
-		},
+		{op = .INITIAL_TRIANGLE, data = Init_Triangle_Data{gs = D_pos, ge = G_pos, v = B_pos}},
 	)
 
 	return new_gate_start
@@ -365,7 +322,7 @@ C :: proc(v: ct.Corner, t: ct.Corner_Table, es: ^Encoder_State) -> ct.Corner {
 	// calculate the next gate
 	new_gate_start := ge
 
-	emit_step(es, {op = .C, data = C_Operation_Data{correction}})
+	emit_step(es, {op = .C, data = C_data{correction}})
 
 	return new_gate_start
 }
@@ -391,7 +348,7 @@ L :: proc(v: ct.Corner, t: ct.Corner_Table, es: ^Encoder_State) -> ct.Corner {
 	es.prev_boundary[next_b] = new_b
 
 	new_gs := ct.left_corner(t, v)
-	emit_step(es, {op = .L, data = L_Operation_Data{}})
+	emit_step(es, {op = .L, data = L_Data{}})
 
 	return new_gs
 }
@@ -424,7 +381,7 @@ R :: proc(v: ct.Corner, t: ct.Corner_Table, es: ^Encoder_State) -> ct.Corner {
 	es.prev_boundary[next_next_b] = new_b
 
 	new_gs := ct.left_corner(t, v)
-	emit_step(es, {op = .R, data = R_Operation_Data{}})
+	emit_step(es, {op = .R, data = R_Data{}})
 
 	return new_gs
 }
@@ -472,7 +429,7 @@ S :: proc(v: ct.Corner, t: ct.Corner_Table, es: ^Encoder_State) -> ct.Corner {
 	// push the left edge on gate_stack
 	append(&es.gate_stack, db)
 
-	emit_step(es, {op = .S, data = S_Operation_Data{}})
+	emit_step(es, {op = .S, data = S_Data{}})
 	return bg
 }
 
@@ -498,7 +455,7 @@ E :: proc(v: ct.Corner, t: ct.Corner_Table, es: ^Encoder_State) -> ct.Corner {
 	es.prev_boundary[gb] = ct.INVALID_CORNER
 	es.prev_boundary[bd] = ct.INVALID_CORNER
 
-	emit_step(es, {op = .E, data = E_Operation_Data{}})
+	emit_step(es, {op = .E, data = E_Data{}})
 
 	new_gs := len(es.gate_stack) > 0 ? pop(&es.gate_stack) : ct.INVALID_CORNER
 
