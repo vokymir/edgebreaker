@@ -278,8 +278,8 @@ initial_triangle :: proc(v: ct.Corner, t: ct.Corner_Table, es: ^Encoder_State) -
  /  \ /  \     all other corners/edges will there be referenced
 A -- B -- E    by their vertices LETTERS - orientation may be
  \  /x\  /     induced as every triangle is counter clock-wise oriented
-  D -- G       
-   \  /
+- D -- G -     
+ / \  / \
     H          H completes the last visited triangle
 */
 C :: proc(v: ct.Corner, t: ct.Corner_Table, es: ^Encoder_State) -> ct.Corner {
@@ -322,87 +322,101 @@ C :: proc(v: ct.Corner, t: ct.Corner_Table, es: ^Encoder_State) -> ct.Corner {
 	// calculate the next gate
 	new_gate_start := ge
 
-	emit_step(es, {op = .C, data = C_data{correction}})
+	emit_step(es, {op = .C, data = C_Data{correction}})
 
 	return new_gate_start
 }
 
+/*
+   C -- F      v is the corner "under" B, ie D--G is the gate
+ /  \ /  \     all other corners/edges will there be referenced
+A -- B -- E    by their vertices LETTERS - orientation may be
+    /x\  / \   induced as every triangle is counter clock-wise oriented
+  D -- G -- H  
+
+Returns:
+- Corner: new boundary edge, ie BG
+*/
 L :: proc(v: ct.Corner, t: ct.Corner_Table, es: ^Encoder_State) -> ct.Corner {
 	log.debug("L")
-	// rewire boundary edges
-	prev_b, _ := prev_on_boundary(v, t, es^)
-	next_b, _ := next_on_boundary(v, t, es^)
-	prev_prev_b, _ := prev_on_boundary(prev_b, t, es^)
+	// find all needed edges
+	dg := v
+	bd := ct.prev_corner(dg)
+	gh, _ := next_on_boundary(v, t, es^)
+	ab, _ := prev_on_boundary(bd, t, es^)
+	bg := ct.opposite_corner(t, ct.next_corner(dg))
 
-	new_b := ct.opposite_corner(t, ct.next_corner(v))
+	// rewire: ab -> bg -> gh
+	es.prev_boundary[bg] = ab
+	es.next_boundary[bg] = gh
 
-	// prev_b is now not in boundary
-	es.next_boundary[prev_b] = ct.INVALID_CORNER
-	es.prev_boundary[prev_b] = ct.INVALID_CORNER
+	es.prev_boundary[gh] = bg
+	es.next_boundary[ab] = bg
 
-	// new boundary is in the middle of prev_prev & next
-	es.next_boundary[new_b] = next_b
-	es.prev_boundary[new_b] = prev_prev_b
+	// bd&dg are now not in boundary
+	es.prev_boundary[bd] = ct.INVALID_CORNER
+	es.next_boundary[bd] = ct.INVALID_CORNER
+	es.prev_boundary[dg] = ct.INVALID_CORNER
+	es.next_boundary[dg] = ct.INVALID_CORNER
 
-	es.next_boundary[prev_prev_b] = new_b
-	es.prev_boundary[next_b] = new_b
-
-	new_gs := ct.left_corner(t, v)
 	emit_step(es, {op = .L, data = L_Data{}})
 
-	return new_gs
+	return bg
 }
 
 /*
-   C    F      v is the corner "under" B, ie D--G
- /  \ /  \     all other corners/edges will there be referenced
-A -- B -- E    by their vertices LETTERS - orientation may be
- \  /x\  /     induced as every triangle is counter clock-wise oriented
-  D -- G
+      C -- F      v is the corner "under" B, ie D--G
+    /  \ /  \     all other corners/edges will there be referenced
+   A -- B -- E    by their vertices LETTERS - orientation may be
+  / \  /x\        induced as every triangle is counter clock-wise oriented
+H -- D -- G
 */
 R :: proc(v: ct.Corner, t: ct.Corner_Table, es: ^Encoder_State) -> ct.Corner {
 	log.debug("R")
 	// rewire boundary edges
-	prev_b, _ := prev_on_boundary(v, t, es^)
-	next_b, _ := next_on_boundary(v, t, es^)
-	next_next_b, _ := next_on_boundary(next_b, t, es^)
+	dg := v
+	gb := ct.next_corner(dg)
+	hd, _ := prev_on_boundary(v, t, es^)
+	be, _ := next_on_boundary(gb, t, es^)
+	db := ct.opposite_corner(t, ct.prev_corner(dg))
 
-	new_b := ct.opposite_corner(t, ct.prev_corner(v))
+	// rewire: hd -> db -> be
+	es.prev_boundary[db] = hd
+	es.next_boundary[db] = be
 
-	// next_b is now not in boundary
-	es.next_boundary[next_b] = ct.INVALID_CORNER
-	es.prev_boundary[next_b] = ct.INVALID_CORNER
+	es.prev_boundary[be] = db
+	es.next_boundary[hd] = db
 
-	// new boundary is in the middle of prev & next_next
-	es.next_boundary[new_b] = next_next_b
-	es.prev_boundary[new_b] = prev_b
+	// dg&gb are now not in boundary
+	es.prev_boundary[dg] = ct.INVALID_CORNER
+	es.next_boundary[dg] = ct.INVALID_CORNER
+	es.prev_boundary[gb] = ct.INVALID_CORNER
+	es.next_boundary[gb] = ct.INVALID_CORNER
 
-	es.next_boundary[prev_b] = new_b
-	es.prev_boundary[next_next_b] = new_b
-
-	new_gs := ct.left_corner(t, v)
 	emit_step(es, {op = .R, data = R_Data{}})
 
-	return new_gs
+	return db
 }
 
 /*
-   C    F      v is the corner "under" B, ie D--G
- /  \ /  \     all other corners/edges will there be referenced
-A -- B -- E    by their vertices LETTERS - orientation may be
- \  /x\  /     induced as every triangle is counter clock-wise oriented
-  D -- G
+      C    F      v is the corner "under" B, ie D--G
+    /  \ /  \     all other corners/edges will there be referenced
+   A -- B -- E    by their vertices LETTERS - orientation may be
+  / \  /x\  / \   induced as every triangle is counter clock-wise oriented
+H -- D -- G -- I
 */
 S :: proc(v: ct.Corner, t: ct.Corner_Table, es: ^Encoder_State) -> ct.Corner {
 	log.debug("S")
-	log.debug(v, t, es)
 	// find all needed edges
 	dg := v
 	// find the boundary edge on the other side of new vertex
-	fb, _ := next_on_boundary(dg, t, es^)
-	for ct.vertex_of_corner(t, dg) != ct.vertex_of_corner(t, ct.next_corner(fb)) {
-		fb, _ = next_on_boundary(fb, t, es^)
+	fb := ct.left_corner(t, dg)
+	for es.next_boundary[fb] != ct.INVALID_CORNER {
+		fb = ct.left_corner(t, dg)
 	}
+	// TODO: pokracuj tady, jeste neni vsude return edge ale obcas jeste furt gs
+	// a ten "main" s tim jeste nepocita vubec
+	// taky si precti koment git pushe nedavno, tam je toho vic
 	bc, _ := next_on_boundary(fb, t, es^)
 
 	ad, _ := prev_on_boundary(dg, t, es^)

@@ -1,7 +1,10 @@
 package edgebreaker
 
 import "core:fmt"
-// here do all standard handlers for edgebreaker
+
+/*
+Standard Stream Handlers for encoding.
+*/
 
 /********************************* Take-and-use *******************************/
 
@@ -38,6 +41,15 @@ Encoder_Event :: struct {
 	data: Operation_Data,
 }
 
+// initializing edgebreaker phase on mesh with boundary with boundary vertices
+Boundary_Data :: struct {
+	vertex_position: Vec3,
+}
+
+Init_Triangle_Data :: struct {
+	gs, ge, v: Vec3,
+}
+
 // standard CLERS operations - only C must have new vertex delta based on
 // predictor.
 
@@ -50,15 +62,6 @@ R_Data :: struct {}
 
 S_Data :: struct {}
 E_Data :: struct {}
-
-// initializing edgebreaker phase on mesh with boundary with boundary vertices
-Boundary_Data :: struct {
-	vertex_position: Vec3,
-}
-
-Init_Triangle_Data :: struct {
-	gs, ge, v: Vec3,
-}
 
 Operation_Data :: union {
 	C_Data,
