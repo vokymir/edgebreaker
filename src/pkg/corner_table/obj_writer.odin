@@ -13,8 +13,8 @@ Supported formats to save to:
 - [OBJ](https://en.wikipedia.org/wiki/Wavefront_.obj_file)
 
 Inputs:
-- filepath: the path to file on disk
 - ct: Corner_Table triangle mesh representation
+- filepath: the path to file on disk
 - allocator: allocator used for temporary structures (unused after return)
 - loc: caller location
 
@@ -27,8 +27,8 @@ save :: proc {
 
 @(private)
 save_ct_to_obj :: proc(
-	filepath: string,
 	ct: Corner_Table,
+	filepath: string,
 	allocator := context.allocator,
 	loc := #caller_location,
 ) -> (

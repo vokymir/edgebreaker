@@ -35,13 +35,13 @@ main :: proc() {
 		fmt.println("loading obj")
 		table: ct.Corner_Table
 		ct.init(&table)
-		ct.load(opt.input, &table)
-		ct.save(opt.output, table)
+		ct.load(&table, opt.input)
+		ct.save(table, opt.input)
 
 		fmt.println("compressing")
 		es: eb.Encoder_State
 		eb.init_es(&es, len(table.geometry), len(table.vertices))
-		eb.compress_ct(table, &es)
+		eb.compress(table, &es)
 		fmt.println("done")
 	// encode
 	case ".ebk":

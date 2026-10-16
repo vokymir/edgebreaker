@@ -13,8 +13,8 @@ Supported formats to load from:
 - [OBJ](https://en.wikipedia.org/wiki/Wavefront_.obj_file): only simple ones
 
 Inputs:
-- filepath: the path to file on disk
 - ct: ptr to initialized Corner_Table
+- filepath: the path to file on disk
 - allocator: allocator used for temporary structures (unused after return)
 - loc: caller location
 
@@ -28,8 +28,8 @@ load :: proc {
 
 @(private)
 load_obj_to_ct :: proc(
-	filepath: string,
 	ct: ^Corner_Table,
+	filepath: string,
 	allocator := context.allocator,
 	loc := #caller_location,
 ) -> (
@@ -46,7 +46,7 @@ load_obj_to_ct :: proc(
 	for line in strings.split_lines_iterator(&it) {
 		// ok to handwave, doesn't handle all line-types in .obj file, therefore
 		// many lines are 'invalid'
-		_ = process_line(line, ct)
+		_ = process_line(ct, line)
 	}
 
 	// part 2:
@@ -59,22 +59,22 @@ load_obj_to_ct :: proc(
 Determine what type of line it is and call corresponding procedure.
 
 Inputs:
-- line: line from .obj file
 - ct: ptr to Corner Table
+- line: line from .obj file
 
 Returns:
 - ok: false if anything bad happens
 */
 @(private = "file")
-process_line :: proc(line: string, ct: ^Corner_Table) -> (ok := false) {
+process_line :: proc(ct: ^Corner_Table, line: string) -> (ok := false) {
 	if len(line) < 2 {
 		return
 	}
 	switch line[0:2] {
 	case "v ":
-		ok = process_vertex(line, ct)
+		ok = process_vertex(ct, line)
 	case "f ":
-		ok = process_face(line, ct)
+		ok = process_face(ct, line)
 	}
 
 	return
@@ -84,14 +84,14 @@ process_line :: proc(line: string, ct: ^Corner_Table) -> (ok := false) {
 Process vertex line from the .obj file and store it in the Corner Table.
 
 Inputs:
-- line: line from .obj file
 - ct: ptr to Corner Table
+- line: line from .obj file
 
 Returns:
 - ok: false if invalid line or parsing fail
 */
 @(private = "file")
-process_vertex :: proc(line: string, ct: ^Corner_Table) -> (ok := false) {
+process_vertex :: proc(ct: ^Corner_Table, line: string) -> (ok := false) {
 	tokens := strings.split(line, " ")
 	if len(tokens) < 4 || len(tokens) > 5 {
 		return
@@ -116,14 +116,14 @@ process_vertex :: proc(line: string, ct: ^Corner_Table) -> (ok := false) {
 Process face line from the .obj file and store it in the Corner Table.
 
 Inputs:
-- line: line from .obj file
 - ct: ptr to Corner Table
+- line: line from .obj file
 
 Returns:
 - ok: false if invalid line or parsing fail
 */
 @(private = "file")
-process_face :: proc(line: string, ct: ^Corner_Table) -> (ok := false) {
+process_face :: proc(ct: ^Corner_Table, line: string) -> (ok := false) {
 	tokens := strings.split(line, " ")
 	if len(tokens) < 4 {
 		return

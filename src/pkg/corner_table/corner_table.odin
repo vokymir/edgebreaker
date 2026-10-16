@@ -92,9 +92,9 @@ opposite_corner :: #force_inline proc(ct: Corner_Table, c: Corner) -> Corner {
 	return ct.opposites[c]
 }
 
-// return corner incident with the same vertex, but on the right of c
-// (clock-wise)
-right_corner :: #force_inline proc(ct: Corner_Table, c: Corner) -> Corner {
+// return corner incident with the same vertex, but on the left of c
+// (counter-clockwise)
+left_corner :: #force_inline proc(ct: Corner_Table, c: Corner) -> Corner {
 	prev := prev_corner(c)
 	op := opposite_corner(ct, prev)
 	if (op == INVALID_CORNER) {
@@ -103,9 +103,9 @@ right_corner :: #force_inline proc(ct: Corner_Table, c: Corner) -> Corner {
 	return prev_corner(op)
 }
 
-// return corner incident with the same vertex, but on the left of c
-// (clock-wise)
-left_corner :: #force_inline proc(ct: Corner_Table, c: Corner) -> Corner {
+// return corner incident with the same vertex, but on the right of c
+// (counter-clockwise)
+right_corner :: #force_inline proc(ct: Corner_Table, c: Corner) -> Corner {
 	next := next_corner(c)
 	op := opposite_corner(ct, next)
 	if (op == INVALID_CORNER) {
@@ -139,14 +139,14 @@ vertex_corners_query :: proc(
 	append(corners, current, loc)
 
 	// start traversal of corners to the right
-	right: {
+	left: {
 		for {
-			current = right_corner(ct, current)
+			current = left_corner(ct, current)
 			if current == initial {
 				return // done the whole circle around vertex
 			}
 			if current == INVALID_CORNER {
-				break right // must now go from initial to the left
+				break left // must now go from initial to the right
 			}
 			append(corners, current, loc)
 		}
@@ -155,9 +155,9 @@ vertex_corners_query :: proc(
 
 	current = initial
 
-	// left
+	// right
 	for {
-		current = left_corner(ct, current)
+		current = right_corner(ct, current)
 		if current == initial {
 			return
 		}
@@ -183,8 +183,8 @@ vertex_is_on_boundary :: proc(ct: Corner_Table, v: Vertex) -> bool {
 
 /*
 Returns:
-- c: corner for which the right_corner() returns INVALID_CORNER, ie right-most
-corner (clock-wise)
+- c: corner for which the left_corner() returns INVALID_CORNER, ie left-most
+corner (counter-clockwise)
 - found: if not on boundary, return false
 */
 boundary_corner_of_vertex :: proc(
@@ -199,9 +199,9 @@ boundary_corner_of_vertex :: proc(
 	current := initial
 	next := current
 
-	// start traversal of corners to the right
+	// start traversal of corners to the left
 	for {
-		next = right_corner(ct, current)
+		next = left_corner(ct, current)
 		if next == initial {
 			return // full-circle => not boundary
 		}
@@ -214,47 +214,16 @@ boundary_corner_of_vertex :: proc(
 
 
 /*
-May be useful for edgebreaker pre-processing & finding the initial boundary and
-all holes.
-*/
-next_boundary_vertex :: proc(
-	ct: Corner_Table,
-	v: Vertex,
-) -> (
-	v_next := INVALID_VERTEX,
-	found := false,
-) {
-
-	initial := corner_of_vertex(ct, v)
-	if initial == INVALID_CORNER {return}
-	current := initial
-	next := current
-
-	// start traversal of corners to the right
-	for {
-		next = right_corner(ct, current)
-		if next == initial {
-			return // v is not a boundary vertex
-		}
-		if next == INVALID_CORNER {
-			break // found & stored in current
-		}
-		current = next
-	}
-
-	v_next = vertex_of_corner(ct, next_corner(current))
-	found = true
-	return
-}
-
-/*
-May be useful for edgebreaker pre-processing & finding the initial boundary and
-all holes.
 WARN: does not work for mesh with holes 
 
 Inputs:
 - ct: corner table
 - c: corner which is in boundary triangle, opposite to boundary edge
+
+Returns:
+- c_next: next boundary edge, ie corner opposite to that edge in the same
+triangle
+- found: bool
 */
 next_boundary_corner :: proc(
 	ct: Corner_Table,
@@ -268,9 +237,9 @@ next_boundary_corner :: proc(
 	current := initial
 	next := current
 
-	// start traversal of corners to the right
+	// start traversal of corners to the left
 	for {
-		next = right_corner(ct, current)
+		next = left_corner(ct, current)
 		if next == initial {
 			return // v is not a boundary vertex
 		}

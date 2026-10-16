@@ -79,13 +79,18 @@ Mark :: enum {
 
 /***************************** Compression ************************************/
 
+compress :: proc {
+	compress_ct,
+}
+
 /*
 Compress mesh represented via corner table and use Encoder_State.handler to
 handle (store/send) data.
 The encoder_state struct must be initialized before.
 */
+@(private)
 compress_ct :: proc(t: ct.Corner_Table, es: ^Encoder_State) -> (ok := false) {
-	index, boundary_component, component_found := next_component(t, es.vertex_marks)
+	index, boundary_component, component_found := next_component(es.vertex_marks, t)
 
 	for component_found { 	// for all components
 		log.debug("component found")
@@ -103,10 +108,10 @@ compress_ct :: proc(t: ct.Corner_Table, es: ^Encoder_State) -> (ok := false) {
 		// special case for open-meshes: must find boundary
 		if boundary_component {
 			log.debug("has boundary")
-			find_all_boundary_edges(v, t, es) or_return
+			find_all_boundary_edges(es, t, v) or_return
 		}
 
-		v = initial_triangle(v, t, es)
+		v = initial_triangle(es, t, v)
 
 		for v != ct.INVALID_CORNER { 	// for all triangles in 1 component
 			gs = ct.next_corner(v)
@@ -115,28 +120,28 @@ compress_ct :: proc(t: ct.Corner_Table, es: ^Encoder_State) -> (ok := false) {
 			time.sleep(2 * time.Second) // debug feature
 
 			v_unvisited := es.vertex_marks[ct.vertex_of_corner(t, v)] == .NOT_VISITED
-			v_follows_g := is_next_on_boundary(v, ge, t, es^)
-			v_precedes_g := is_next_on_boundary(ge, v, t, es^)
+			v_follows_g := is_next_on_boundary(es^, t, v, ge)
+			v_precedes_g := is_next_on_boundary(es^, t, ge, v)
 
 			if v_unvisited {
-				v = C(v, t, es)
+				v = C(es, t, v)
 			} else if v_follows_g {
 				if v_precedes_g {
-					v = E(v, t, es)
+					v = E(es, t, v)
 				} else {
-					v = R(v, t, es)
+					v = R(es, t, v)
 				}
 			} else if v_precedes_g {
-				v = L(v, t, es)
+				v = L(es, t, v)
 			} else {
-				v = S(v, t, es)
+				v = S(es, t, v)
 			}
 		} // while the current vertex is in any not visited triangle
 
 		// find another unvisited vertex, ie another mesh
 		index, boundary_component, component_found = next_component(
-			t,
 			es.vertex_marks,
+			t,
 			index,
 			boundary_component,
 		)
@@ -159,7 +164,7 @@ A -- B -- E    by their vertices LETTERS - orientation may be
 Returns:
 - Corner: new gate edge, ie BG
 */
-initial_triangle :: proc(v: ct.Corner, t: ct.Corner_Table, es: ^Encoder_State) -> ct.Corner {
+initial_triangle :: proc(es: ^Encoder_State, t: ct.Corner_Table, v: ct.Corner) -> ct.Corner {
 	dg := v
 	gb := ct.next_corner(dg)
 	bd := ct.prev_corner(dg)
@@ -177,9 +182,9 @@ initial_triangle :: proc(v: ct.Corner, t: ct.Corner_Table, es: ^Encoder_State) -
 
 	// rewire boundary edges
 	// for bounded mesh
-	if ad, bounded_mesh := prev_on_boundary(dg, t, es^); bounded_mesh {
+	if ad, bounded_mesh := prev_on_boundary(es^, t, dg); bounded_mesh {
 		log.debug("i am in bounded mesh")
-		ge, _ := next_on_boundary(dg, t, es^)
+		ge, _ := next_on_boundary(es^, t, dg)
 
 		es.next_boundary[ad] = db
 		es.next_boundary[db] = bg
@@ -225,7 +230,7 @@ A -- B -- E    by their vertices LETTERS - orientation may be
 Returns:
 - Corner: new gate edge, ie BG
 */
-C :: proc(v: ct.Corner, t: ct.Corner_Table, es: ^Encoder_State) -> ct.Corner {
+C :: proc(es: ^Encoder_State, t: ct.Corner_Table, v: ct.Corner) -> ct.Corner {
 	log.debug("C")
 	dg := v
 	// calculate correction to prediction of next vertex
@@ -245,8 +250,8 @@ C :: proc(v: ct.Corner, t: ct.Corner_Table, es: ^Encoder_State) -> ct.Corner {
 	es.vertex_marks[ct.vertex_of_corner(t, dg)] = .VISITED
 
 	// rewire boundary edges
-	ad, _ := prev_on_boundary(dg, t, es^)
-	ge, _ := next_on_boundary(dg, t, es^)
+	ad, _ := prev_on_boundary(es^, t, dg)
+	ge, _ := next_on_boundary(es^, t, dg)
 
 	db := ct.opposite_corner(t, ct.prev_corner(dg))
 	bg := ct.opposite_corner(t, ct.next_corner(dg))
@@ -277,13 +282,13 @@ A -- B -- E    by their vertices LETTERS - orientation may be
 Returns:
 - Corner: new gate edge, ie BG
 */
-L :: proc(v: ct.Corner, t: ct.Corner_Table, es: ^Encoder_State) -> ct.Corner {
+L :: proc(es: ^Encoder_State, t: ct.Corner_Table, v: ct.Corner) -> ct.Corner {
 	log.debug("L")
 	// find all needed edges
 	dg := v
 	bd := ct.prev_corner(dg)
-	gh, _ := next_on_boundary(v, t, es^)
-	ab, _ := prev_on_boundary(bd, t, es^)
+	gh, _ := next_on_boundary(es^, t, v)
+	ab, _ := prev_on_boundary(es^, t, bd)
 	bg := ct.opposite_corner(t, ct.next_corner(dg))
 
 	// rewire: ab -> bg -> gh
@@ -314,13 +319,13 @@ H -- D -- G
 Returns:
 - Corner: new gate edge, ie DB
 */
-R :: proc(v: ct.Corner, t: ct.Corner_Table, es: ^Encoder_State) -> ct.Corner {
+R :: proc(es: ^Encoder_State, t: ct.Corner_Table, v: ct.Corner) -> ct.Corner {
 	log.debug("R")
 	// rewire boundary edges
 	dg := v
 	gb := ct.next_corner(dg)
-	hd, _ := prev_on_boundary(v, t, es^)
-	be, _ := next_on_boundary(gb, t, es^)
+	hd, _ := prev_on_boundary(es^, t, v)
+	be, _ := next_on_boundary(es^, t, gb)
 	db := ct.opposite_corner(t, ct.prev_corner(dg))
 
 	// rewire: hd -> db -> be
@@ -351,21 +356,21 @@ H -- D -- G -- I
 Returns:
 - Corner: new gate edge, ie BG
 */
-S :: proc(v: ct.Corner, t: ct.Corner_Table, es: ^Encoder_State) -> ct.Corner {
+S :: proc(es: ^Encoder_State, t: ct.Corner_Table, v: ct.Corner) -> ct.Corner {
 	log.debug("S")
 	// find all needed edges
 	dg := v
 	// find the boundary edge on the other side of new vertex in O(1)
 	// WARN: won't neccessarily work on meshes with holes
-	fb := ct.left_corner(t, dg)
+	fb := ct.right_corner(t, dg)
 	for es.next_boundary[fb] != ct.INVALID_CORNER {
-		fb = ct.left_corner(t, dg)
+		fb = ct.right_corner(t, dg)
 	}
 
-	bc, _ := next_on_boundary(fb, t, es^)
+	bc, _ := next_on_boundary(es^, t, fb)
 
-	hd, _ := prev_on_boundary(dg, t, es^)
-	gi, _ := next_on_boundary(dg, t, es^)
+	hd, _ := prev_on_boundary(es^, t, dg)
+	gi, _ := next_on_boundary(es^, t, dg)
 	db := ct.opposite_corner(t, ct.prev_corner(dg))
 	bg := ct.opposite_corner(t, ct.next_corner(dg))
 
@@ -400,7 +405,7 @@ S :: proc(v: ct.Corner, t: ct.Corner_Table, es: ^Encoder_State) -> ct.Corner {
   D -- G
 
 */
-E :: proc(v: ct.Corner, t: ct.Corner_Table, es: ^Encoder_State) -> ct.Corner {
+E :: proc(es: ^Encoder_State, t: ct.Corner_Table, v: ct.Corner) -> ct.Corner {
 	log.debug("E")
 	dg := v
 	gb := ct.next_corner(dg)
@@ -436,9 +441,9 @@ H -- D -- G -- I
 
 */
 find_all_boundary_edges :: proc(
-	initial: ct.Corner,
-	t: ct.Corner_Table,
 	es: ^Encoder_State,
+	t: ct.Corner_Table,
+	initial: ct.Corner,
 ) -> (
 	ok: bool,
 ) {
@@ -459,7 +464,7 @@ find_all_boundary_edges :: proc(
 
 		// TODO: there might be one-off error because of the advancing
 
-		// 2. search one edge to the right
+		// 2. search one edge to the right (counter-clockwise)
 		ie, found := ct.next_boundary_corner(t, gi)
 		if !found {return false}
 
@@ -481,21 +486,16 @@ find_all_boundary_edges :: proc(
 /****************************** Traversal helpers *****************************/
 
 /*
-Complexity:
-- O(n): For existing open-meshes it might be less than n, for closed meshes it
-is always n.
-TODO: split into two independent searches, so first it looks for boundaries,
-second not for and in total it would be 2n steps, not k*n where k~= # components
-DONE; TODO: update this DOC comment
-TODO: make sane ordering of in-out args, so it is not wild west
+Find next component ie next unmarked vertex in marks. If s_f_f_b is true, it
+will prefer boundary vertices. If not, it will go linear from start (default=0)
+to end.
 
 Returns:
-- index: Index in marks of the first found component. If the component is open,
-return index of vertex on boundary. If closed, returns first found index.
+- index: Index in marks of the first found component
 */
 next_component :: proc(
-	t: ct.Corner_Table,
 	marks: []Mark,
+	t: ct.Corner_Table,
 	start := 0,
 	search_first_for_boundary := true,
 ) -> (
@@ -520,7 +520,7 @@ next_component :: proc(
 
 	for mark, i in marks[start:] {
 		if mark == .NOT_VISITED {
-			log.debug("found in closed mesh")
+			log.debug("found")
 			return start + i, false, true
 		}
 	}
@@ -529,38 +529,19 @@ next_component :: proc(
 	return -1, false, false
 }
 
-// find third vertex for given vertices, but return it as a corner
-third_corner :: proc(v1, v2: ct.Vertex, t: ct.Corner_Table) -> ct.Corner {
-	c := ct.corner_of_vertex(t, v1)
-	// if on boundary, start most left
-	if ct.vertex_is_on_boundary(t, v1) {
-		for l := ct.left_corner(t, c); l != ct.INVALID_CORNER; c = l {
-			l = ct.left_corner(t, c)
-		}
-	}
-
-	// find the correct corner in triangle
-	for ct.vertex_of_corner(t, ct.next_corner(c)) != v2 {
-		c = ct.right_corner(t, c)
-	}
-
-	// return the third corner in that triangle
-	return ct.prev_corner(c)
-}
-
-is_next_on_boundary :: proc(c1, c2: ct.Corner, t: ct.Corner_Table, es: Encoder_State) -> bool {
-	n := next_on_boundary(c1, t, es) or_return // default bool is false
+is_next_on_boundary :: proc(es: Encoder_State, t: ct.Corner_Table, c1, c2: ct.Corner) -> bool {
+	n := next_on_boundary(es, t, c1) or_return // default bool is false
 
 	return n == c2
 }
 
 /*
-Find the next (right, anti-clockwise) corner on the current edgebreaker boundary.
+Find the next (right, counter-clockwise) corner on the current edgebreaker boundary.
 */
 next_on_boundary :: proc(
-	c: ct.Corner,
-	t: ct.Corner_Table,
 	es: Encoder_State,
+	t: ct.Corner_Table,
+	c: ct.Corner,
 ) -> (
 	next_c := ct.INVALID_CORNER,
 	found := false,
@@ -574,9 +555,9 @@ next_on_boundary :: proc(
 	return
 }
 prev_on_boundary :: proc(
-	c: ct.Corner,
-	t: ct.Corner_Table,
 	es: Encoder_State,
+	t: ct.Corner_Table,
+	c: ct.Corner,
 ) -> (
 	prev_c := ct.INVALID_CORNER,
 	found := false,

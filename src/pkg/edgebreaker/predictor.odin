@@ -36,7 +36,7 @@ Inputs:
 newly found v)
 
 Returns:
-- Vec3: the position of vertex v
+- Vec3: the PREDICTED position of vertex v
 */
 Predictor_Proc :: #type proc(gs, ge, o: Vec3) -> Vec3
 
