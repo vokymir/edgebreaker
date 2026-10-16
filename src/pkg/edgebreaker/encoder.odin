@@ -6,6 +6,22 @@ import "core:log"
 import "core:slice"
 import "core:time"
 
+@(private = "file")
+@(disabled = !ODIN_DEBUG)
+assert_boundary_consistent :: proc(es: Encoder_State, t: ct.Corner_Table) {
+	for i in 0 ..< len(es.next_boundary) {
+		c := ct.Corner(i)
+		n := es.next_boundary[c]
+		if n == ct.INVALID_CORNER {continue}
+		assert(es.prev_boundary[n] == c, "Invalid boundary sequence.")
+		// c's edge ends at prev(c); the next edge must start there
+		assert(
+			ct.vertex_of_corner(t, ct.next_corner(n)) == ct.vertex_of_corner(t, ct.prev_corner(c)),
+			"Boundary must be continuous.",
+		)
+	}
+}
+
 /***************************** Structs ****************************************/
 
 Encoder_State :: struct {
@@ -90,51 +106,63 @@ The encoder_state struct must be initialized before.
 */
 @(private)
 compress_ct :: proc(t: ct.Corner_Table, es: ^Encoder_State) -> (ok := false) {
+	log.debug(t.geometry)
 	index, boundary_component, component_found := next_component(es.vertex_marks, t)
 
 	for component_found { 	// for all components
-		log.debug("component found")
-		//     v
-		//   /  \
-		// gs----ge
+		log.debug("component found on", index)
+		//     v                             v      which is handled
+		//   /  \     OR this may happen:  /  \     in the if on_boundary{}
+		// gs -- ge                      ge -- gs   case
 		// as in gate start & gate end
 		gs, on_boundary := ct.boundary_corner_of_vertex(t, ct.Vertex(index))
-		if !on_boundary { 	// then get any corner
+		log.debug("gate is", on_boundary ? "" : "not", "on boundary")
+		if on_boundary {
+			ge := ct.next_corner(gs)
+			if !ct.vertex_is_on_boundary(t, ct.vertex_of_corner(t, ge)) {
+				// here ge is in fact v therefore gs is:
+				gs = ct.prev_corner(gs)
+			}
+		} else { 	// take any from the triangle
 			gs = ct.corner_of_vertex(t, ct.Vertex(index))
 		}
 		ge := ct.next_corner(gs)
-		v := ct.next_corner(ge)
+		gate := ct.next_corner(ge)
 
 		// special case for open-meshes: must find boundary
 		if boundary_component {
-			log.debug("has boundary")
-			find_all_boundary_edges(es, t, v) or_return
+			log.debug("component has boundary")
+			find_all_boundary_edges(es, t, gate) or_return
 		}
 
-		v = initial_triangle(es, t, v)
+		gate = initial_triangle(es, t, gate)
 
-		for v != ct.INVALID_CORNER { 	// for all triangles in 1 component
-			gs = ct.next_corner(v)
-			ge = ct.prev_corner(v)
+		for gate != ct.INVALID_CORNER { 	// for all triangles in 1 component
+			assert_boundary_consistent(es^, t)
+			log.debug("gate is on corner", gate)
+			gs = ct.next_corner(gate)
+			ge = ct.prev_corner(gate)
 
 			time.sleep(2 * time.Second) // debug feature
 
-			v_unvisited := es.vertex_marks[ct.vertex_of_corner(t, v)] == .NOT_VISITED
-			v_follows_g := is_next_on_boundary(es^, t, v, ge)
-			v_precedes_g := is_next_on_boundary(es^, t, ge, v)
+			v_unvisited := es.vertex_marks[ct.vertex_of_corner(t, gate)] == .NOT_VISITED
+			v_follows_g := is_next_on_boundary(es^, t, gate, gs)
+			v_precedes_g := is_next_on_boundary(es^, t, ge, gate)
 
 			if v_unvisited {
-				v = C(es, t, v)
+				gate = C(es, t, gate)
+
 			} else if v_follows_g {
 				if v_precedes_g {
-					v = E(es, t, v)
+					gate = E(es, t, gate)
 				} else {
-					v = R(es, t, v)
+					gate = R(es, t, gate)
 				}
+
 			} else if v_precedes_g {
-				v = L(es, t, v)
+				gate = L(es, t, gate)
 			} else {
-				v = S(es, t, v)
+				gate = S(es, t, gate)
 			}
 		} // while the current vertex is in any not visited triangle
 
@@ -202,13 +230,13 @@ initial_triangle :: proc(es: ^Encoder_State, t: ct.Corner_Table, v: ct.Corner) -
 		log.debug("i am in closed mesh")
 		gd := ct.opposite_corner(t, dg)
 
-		es.next_boundary[gd] = bg
-		es.next_boundary[bg] = db
-		es.next_boundary[db] = gd
+		es.next_boundary[gd] = db
+		es.next_boundary[db] = bg
+		es.next_boundary[bg] = gd
 
-		es.prev_boundary[gd] = db
-		es.prev_boundary[db] = bg
-		es.prev_boundary[bg] = gd
+		es.prev_boundary[gd] = bg
+		es.prev_boundary[db] = gd
+		es.prev_boundary[bg] = db
 	}
 
 	emit_step(
@@ -238,6 +266,7 @@ C :: proc(es: ^Encoder_State, t: ct.Corner_Table, v: ct.Corner) -> ct.Corner {
 	// calculate correction to prediction of next vertex
 	H_pos: Vec3
 	if v == ct.INVALID_CORNER || ct.opposite_corner(t, dg) == ct.INVALID_CORNER {
+		log.debug("cannot get position of H")
 		H_pos = {0, 0, 0}
 	} else {
 		H_pos = ct.corner_position(t, ct.opposite_corner(t, dg))
@@ -537,6 +566,11 @@ next_component :: proc(
 	return -1, false, false
 }
 
+/*
+
+Returns:
+- true if c2 is next boundary edge after c1
+ */
 @(private = "file")
 is_next_on_boundary :: proc(es: Encoder_State, t: ct.Corner_Table, c1, c2: ct.Corner) -> bool {
 	n := next_on_boundary(es, t, c1) or_return // default bool is false
