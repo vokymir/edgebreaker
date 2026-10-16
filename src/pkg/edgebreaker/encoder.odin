@@ -486,7 +486,7 @@ find_all_boundary_edges :: proc(
 	if initial == ct.INVALID_CORNER {return false}
 
 	dg := initial
-	gi, found := ct.next_boundary_corner(t, ct.prev_corner(dg))
+	gi, found := ct.next_boundary_corner(t, dg)
 	if !found {return false}
 
 	for {
@@ -497,8 +497,6 @@ find_all_boundary_edges :: proc(
 		pos := ct.corner_position(t, bd)
 
 		emit_step(es, {op = .BOUNDARY_VERTEX, data = Boundary_Data{pos}})
-
-		// TODO: there might be one-off error because of the advancing
 
 		// 2. search one edge to the right (counter-clockwise)
 		ie, found := ct.next_boundary_corner(t, gi)
