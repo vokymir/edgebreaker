@@ -36,7 +36,7 @@ main :: proc() {
 		table: ct.Corner_Table
 		ct.init(&table)
 		ct.load(&table, opt.input)
-		ct.save(table, opt.input)
+		// ct.save(table, opt.input)
 
 		fmt.println("compressing")
 		es: eb.Encoder_State
