@@ -143,7 +143,7 @@ compress_ct :: proc(t: ct.Corner_Table, es: ^Encoder_State) -> (ok := false) {
 			gs = ct.next_corner(gate)
 			ge = ct.prev_corner(gate)
 
-			time.sleep(2 * time.Second) // debug feature
+			// time.sleep(2 * time.Second) // debug feature
 
 			v_unvisited := es.vertex_marks[ct.vertex_of_corner(t, gate)] == .NOT_VISITED
 			v_follows_g := is_next_on_boundary(es^, t, gate, gs)
@@ -397,8 +397,8 @@ S :: proc(es: ^Encoder_State, t: ct.Corner_Table, v: ct.Corner) -> ct.Corner {
 	// find the boundary edge on the other side of new vertex in O(1)
 	// WARN: won't neccessarily work on meshes with holes
 	fb := ct.right_corner(t, dg)
-	for es.next_boundary[fb] != ct.INVALID_CORNER {
-		fb = ct.right_corner(t, dg)
+	for es.next_boundary[ct.next_corner(fb)] == ct.INVALID_CORNER {
+		fb = ct.right_corner(t, fb)
 	}
 
 	bc, _ := next_on_boundary(es^, t, fb)
