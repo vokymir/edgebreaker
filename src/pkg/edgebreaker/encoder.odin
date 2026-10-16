@@ -164,6 +164,7 @@ A -- B -- E    by their vertices LETTERS - orientation may be
 Returns:
 - Corner: new gate edge, ie BG
 */
+@(private = "file")
 initial_triangle :: proc(es: ^Encoder_State, t: ct.Corner_Table, v: ct.Corner) -> ct.Corner {
 	dg := v
 	gb := ct.next_corner(dg)
@@ -230,6 +231,7 @@ A -- B -- E    by their vertices LETTERS - orientation may be
 Returns:
 - Corner: new gate edge, ie BG
 */
+@(private = "file")
 C :: proc(es: ^Encoder_State, t: ct.Corner_Table, v: ct.Corner) -> ct.Corner {
 	log.debug("C")
 	dg := v
@@ -282,6 +284,7 @@ A -- B -- E    by their vertices LETTERS - orientation may be
 Returns:
 - Corner: new gate edge, ie BG
 */
+@(private = "file")
 L :: proc(es: ^Encoder_State, t: ct.Corner_Table, v: ct.Corner) -> ct.Corner {
 	log.debug("L")
 	// find all needed edges
@@ -319,6 +322,7 @@ H -- D -- G
 Returns:
 - Corner: new gate edge, ie DB
 */
+@(private = "file")
 R :: proc(es: ^Encoder_State, t: ct.Corner_Table, v: ct.Corner) -> ct.Corner {
 	log.debug("R")
 	// rewire boundary edges
@@ -356,6 +360,7 @@ H -- D -- G -- I
 Returns:
 - Corner: new gate edge, ie BG
 */
+@(private = "file")
 S :: proc(es: ^Encoder_State, t: ct.Corner_Table, v: ct.Corner) -> ct.Corner {
 	log.debug("S")
 	// find all needed edges
@@ -405,6 +410,7 @@ S :: proc(es: ^Encoder_State, t: ct.Corner_Table, v: ct.Corner) -> ct.Corner {
   D -- G
 
 */
+@(private = "file")
 E :: proc(es: ^Encoder_State, t: ct.Corner_Table, v: ct.Corner) -> ct.Corner {
 	log.debug("E")
 	dg := v
@@ -440,6 +446,7 @@ with G counter-clockwise to D.
 H -- D -- G -- I
 
 */
+@(private = "file")
 find_all_boundary_edges :: proc(
 	es: ^Encoder_State,
 	t: ct.Corner_Table,
@@ -493,6 +500,7 @@ to end.
 Returns:
 - index: Index in marks of the first found component
 */
+@(private = "file")
 next_component :: proc(
 	marks: []Mark,
 	t: ct.Corner_Table,
@@ -529,6 +537,7 @@ next_component :: proc(
 	return -1, false, false
 }
 
+@(private = "file")
 is_next_on_boundary :: proc(es: Encoder_State, t: ct.Corner_Table, c1, c2: ct.Corner) -> bool {
 	n := next_on_boundary(es, t, c1) or_return // default bool is false
 
@@ -538,6 +547,7 @@ is_next_on_boundary :: proc(es: Encoder_State, t: ct.Corner_Table, c1, c2: ct.Co
 /*
 Find the next (right, counter-clockwise) corner on the current edgebreaker boundary.
 */
+@(private = "file")
 next_on_boundary :: proc(
 	es: Encoder_State,
 	t: ct.Corner_Table,
@@ -554,6 +564,7 @@ next_on_boundary :: proc(
 	found = next_c != ct.INVALID_CORNER
 	return
 }
+@(private = "file")
 prev_on_boundary :: proc(
 	es: Encoder_State,
 	t: ct.Corner_Table,
