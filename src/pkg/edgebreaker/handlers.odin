@@ -16,6 +16,12 @@ Print_Handler := Encoder_Stream_Handler {
 	on_event  = handle_as_print,
 }
 
+emit_step :: proc(state: ^Encoder_State, event: Encoder_Event) {
+	if state.handler.on_event != nil {
+		state.handler.on_event(state.handler.user_data, event)
+	}
+}
+
 /********************************* Definitions ********************************/
 
 /*

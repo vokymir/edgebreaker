@@ -246,3 +246,41 @@ next_boundary_vertex :: proc(
 	found = true
 	return
 }
+
+/*
+May be useful for edgebreaker pre-processing & finding the initial boundary and
+all holes.
+WARN: does not work for mesh with holes 
+
+Inputs:
+- ct: corner table
+- c: corner which is in boundary triangle, opposite to boundary edge
+*/
+next_boundary_corner :: proc(
+	ct: Corner_Table,
+	c: Corner,
+) -> (
+	c_next := INVALID_CORNER,
+	found := false,
+) {
+	if c == INVALID_CORNER {return}
+	initial := prev_corner(c)
+	current := initial
+	next := current
+
+	// start traversal of corners to the right
+	for {
+		next = right_corner(ct, current)
+		if next == initial {
+			return // v is not a boundary vertex
+		}
+		if next == INVALID_CORNER {
+			break // found & stored in current
+		}
+		current = next
+	}
+
+	c_next = prev_corner(current)
+	found = true
+	return
+}
