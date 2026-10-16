@@ -400,6 +400,7 @@ S :: proc(es: ^Encoder_State, t: ct.Corner_Table, v: ct.Corner) -> ct.Corner {
 	for es.next_boundary[ct.next_corner(fb)] == ct.INVALID_CORNER {
 		fb = ct.right_corner(t, fb)
 	}
+	fb = ct.next_corner(fb)
 
 	bc, _ := next_on_boundary(es^, t, fb)
 
