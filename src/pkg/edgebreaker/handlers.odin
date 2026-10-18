@@ -1,6 +1,8 @@
 package edgebreaker
 
 import "core:fmt"
+import "core:log"
+import "core:os"
 
 /*
 Standard Stream Handlers for encoding.
@@ -14,6 +16,15 @@ Print everything straight to console using core:fmt.
 Print_Handler := Encoder_Stream_Handler {
 	user_data = nil,
 	on_event  = handle_as_print,
+}
+
+/*
+Save everything in simple text format into file.
+Caller MUST PUT a file handle to user_data!
+*/
+Save_Text_Handler := Encoder_Stream_Handler {
+	user_data = nil,
+	on_event  = handle_as_text_save,
 }
 
 emit_step :: proc(state: ^Encoder_State, event: Encoder_Event) {
@@ -99,5 +110,27 @@ handle_as_print :: proc(user_data: rawptr, event: Encoder_Event) {
 	case .INITIAL_TRIANGLE:
 		data := event.data.(Init_Triangle_Data)
 		fmt.println("Initial Triangle:", data.gs, data.ge, data.v)
+	}
+}
+
+handle_as_text_save :: proc(user_data: rawptr, event: Encoder_Event) {
+	f := cast(^os.File)user_data
+	log.debug("TEXT SAVED!")
+	switch event.op {
+	case .C:
+		fmt.fprintln(f, "C", event.data.(C_Data).vertex_delta)
+	case .L:
+		fmt.fprintln(f, "L")
+	case .E:
+		fmt.fprintln(f, "E")
+	case .R:
+		fmt.fprintln(f, "R")
+	case .S:
+		fmt.fprintln(f, "S")
+	case .BOUNDARY_VERTEX:
+		fmt.fprintln(f, "Boundary Vertex:", event.data.(Boundary_Data).vertex_position)
+	case .INITIAL_TRIANGLE:
+		data := event.data.(Init_Triangle_Data)
+		fmt.fprintln(f, "Initial Triangle:", data.gs, data.ge, data.v)
 	}
 }
