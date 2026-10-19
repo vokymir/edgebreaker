@@ -1,5 +1,7 @@
 package visualizer
 
+import ct "../../pkg/corner_table"
+import eb "../../pkg/edgebreaker"
 import "core:time"
 import rl "vendor:raylib"
 import rlgl "vendor:raylib/rlgl"
@@ -13,11 +15,35 @@ Window :: struct {
 }
 
 Vis :: struct {
-	tick_rate: time.Duration,
-	last_tick: time.Time,
-	autoplay:  bool,
-	step:      int,
-	steps:     []Step,
+	tick_rate:       time.Duration,
+	last_tick:       time.Time,
+	autoplay:        bool,
+	step:            int,
+	// storage - get out?
+	steps:           [dynamic]Step,
+	vertices:        [dynamic]rl.Vector3,
+	indices:         [dynamic][3]u16,
+	colors:          [dynamic]rl.Color,
+	triangle_colors: [dynamic]rl.Color,
+
+	// Doubly-linked boundary loop storage
+	boundary_nodes:  [dynamic]Boundary_Node,
+	gate_v1:         int, // Left vertex index in boundary_nodes
+	gate_v2:         int, // Right vertex index in boundary_nodes
+}
+
+init_vis :: proc(vis: ^Vis) {
+	vis.steps = make([dynamic]Step)
+	vis.vertices = make([dynamic]rl.Vector3)
+	vis.indices = make([dynamic][3]u16)
+	vis.colors = make([dynamic]rl.Color)
+	vis.triangle_colors = make([dynamic]rl.Color)
+	vis.boundary_nodes = make([dynamic]Boundary_Node)
+
+	vis.tick_rate = 300 * time.Millisecond
+	vis.last_tick = time.now()
+	vis.autoplay = false
+	vis.step = 0
 }
 
 main :: proc() {
@@ -28,46 +54,28 @@ main :: proc() {
 	rl.SetTargetFPS(window.fps)
 	defer rl.CloseWindow()
 
+	table: ct.Corner_Table
+	ct.init(&table)
+	ct.load(&table, "../ebk/tetrahedron.obj")
+	// ct.load(&table, "../ebk/paper.obj")
 
-	vis := Vis {
-		tick_rate = 300 * time.Millisecond,
-		last_tick = time.now(),
-		autoplay  = false,
-		step      = 0,
-		steps     = {
-			{op = .INIT, tri_delta = 1, vert_delta = 3},
-			{op = .C, tri_delta = 1, vert_delta = 1},
-			{op = .R, tri_delta = 1, vert_delta = 0},
-			{op = .L, tri_delta = 1, vert_delta = 0},
-			{op = .E, tri_delta = 1, vert_delta = 0},
-		},
-	}
-	raw_positions := [][3]f32 {
-		// Tri 0 (Init)
-		{-1.0, 0.0, -1.0},
-		{1.0, 0.0, -1.0},
-		{0.0, 1.0, 0.0},
-		// Tri 1 (C)
-		{1.0, 0.0, -1.0},
-		{0.0, 0.0, 1.0},
-		{0.0, 1.0, 0.0},
-		// Tri 2 (R)
-		{0.0, 0.0, 1.0},
-		{-1.0, 0.0, -1.0},
-		{0.0, 1.0, 0.0},
-		// Tri 3 (L)
-		{-1.0, 0.0, -1.0},
-		{1.0, 0.0, -1.0},
-		{0.0, 0.0, 1.0},
-		// Tri 4 (E)
-		{-1.0, 0.0, -1.0},
-		{0.0, -1.0, 0.0},
-		{1.0, 0.0, -1.0},
-	}
-	total_triangles := len(vis.steps)
+	vis: Vis
+	init_vis(&vis)
+
+	es: eb.Encoder_State
+	eb.init_es(
+		&es,
+		len(table.geometry),
+		len(table.vertices),
+		create_vis_handler(&vis),
+		eb.Predictor_None,
+	)
+	eb.compress(table, &es)
+
+	total_triangles := len(vis.triangle_colors)
 	total_vertices := total_triangles * 3
 
-	// Flatten coordinates and build initial per-vertex color array
+	// Flatten coordinates and assign unrolled colors
 	vertices := make([]f32, total_vertices * 3)
 	colors := make([]rl.Color, total_vertices)
 	indices := make([]u16, total_vertices)
@@ -76,18 +84,18 @@ main :: proc() {
 	defer delete(indices)
 
 	for i in 0 ..< total_vertices {
-		vertices[i * 3 + 0] = raw_positions[i][0]
-		vertices[i * 3 + 1] = raw_positions[i][1]
-		vertices[i * 3 + 2] = raw_positions[i][2]
+		vertices[i * 3 + 0] = vis.vertices[i].x
+		vertices[i * 3 + 1] = vis.vertices[i].y
+		vertices[i * 3 + 2] = vis.vertices[i].z
 
 		indices[i] = u16(i)
 
-		// Map triangle index to step operation color
+		// Map each vertex of the triangle to the operation color
 		tri_idx := i / 3
-		colors[i] = op_to_color(vis.steps[tri_idx].op)
+		colors[i] = vis.triangle_colors[tri_idx]
 	}
 
-	// 2. Build Raylib Mesh
+	// Build Raylib Mesh
 	mesh: rl.Mesh
 	mesh.vertexCount = i32(total_vertices)
 	mesh.triangleCount = i32(total_triangles)
