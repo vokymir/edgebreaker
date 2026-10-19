@@ -1,10 +1,7 @@
 package visualizer
 
-import ct "../../pkg/corner_table"
-import eb "../../pkg/edgebreaker"
 import "core:time"
 import rl "vendor:raylib"
-import rlgl "vendor:raylib/rlgl"
 
 Window :: struct {
 	name:          cstring,
@@ -14,187 +11,88 @@ Window :: struct {
 	control_flags: rl.ConfigFlags,
 }
 
-Vis :: struct {
-	tick_rate:       time.Duration,
-	last_tick:       time.Time,
-	autoplay:        bool,
-	step:            int,
-	// storage - get out?
-	steps:           [dynamic]Step,
-	vertices:        [dynamic]rl.Vector3,
-	indices:         [dynamic][3]u16,
-	colors:          [dynamic]rl.Color,
-	triangle_colors: [dynamic]rl.Color,
-
-	// Doubly-linked boundary loop storage
-	boundary_nodes:  [dynamic]Boundary_Node,
-	gate_v1:         int, // Left vertex index in boundary_nodes
-	gate_v2:         int, // Right vertex index in boundary_nodes
+Page :: enum {
+	LOAD,
+	VIS,
 }
 
-init_vis :: proc(vis: ^Vis) {
-	vis.steps = make([dynamic]Step)
-	vis.vertices = make([dynamic]rl.Vector3)
-	vis.indices = make([dynamic][3]u16)
-	vis.colors = make([dynamic]rl.Color)
-	vis.triangle_colors = make([dynamic]rl.Color)
-	vis.boundary_nodes = make([dynamic]Boundary_Node)
-
-	vis.tick_rate = 300 * time.Millisecond
-	vis.last_tick = time.now()
-	vis.autoplay = false
-	vis.step = 0
+App :: struct {
+	page:          Page,
+	filename:      cstring,
+	//
+	error_message: cstring,
+	error_time:    time.Time,
 }
 
 main :: proc() {
 	window := Window{"Edgebreaker Visualizer", 1024, 720, 60, rl.ConfigFlags{.WINDOW_RESIZABLE}}
+	app := App{.LOAD, nil, nil, time.now()}
 
 	rl.InitWindow(window.width, window.height, window.name)
 	rl.SetWindowState(window.control_flags)
 	rl.SetTargetFPS(window.fps)
 	defer rl.CloseWindow()
 
-	table: ct.Corner_Table
-	ct.init(&table)
-	ct.load(&table, "../ebk/tetrahedron.obj")
-	// ct.load(&table, "../ebk/paper.obj")
-
-	vis: Vis
-	init_vis(&vis)
-
-	es: eb.Encoder_State
-	eb.init_es(
-		&es,
-		len(table.geometry),
-		len(table.vertices),
-		create_vis_handler(&vis),
-		eb.Predictor_None,
-	)
-	eb.compress(table, &es)
-
-	total_triangles := len(vis.triangle_colors)
-	total_vertices := total_triangles * 3
-
-	// Flatten coordinates and assign unrolled colors
-	vertices := make([]f32, total_vertices * 3)
-	colors := make([]rl.Color, total_vertices)
-	indices := make([]u16, total_vertices)
-	defer delete(vertices)
-	defer delete(colors)
-	defer delete(indices)
-
-	for i in 0 ..< total_vertices {
-		vertices[i * 3 + 0] = vis.vertices[i].x
-		vertices[i * 3 + 1] = vis.vertices[i].y
-		vertices[i * 3 + 2] = vis.vertices[i].z
-
-		indices[i] = u16(i)
-
-		// Map each vertex of the triangle to the operation color
-		tri_idx := i / 3
-		colors[i] = vis.triangle_colors[tri_idx]
-	}
-
-	// Build Raylib Mesh
-	mesh: rl.Mesh
-	mesh.vertexCount = i32(total_vertices)
-	mesh.triangleCount = i32(total_triangles)
-	mesh.vertices = raw_data(vertices)
-	mesh.indices = raw_data(indices)
-	mesh.colors = cast(^u8)raw_data(colors)
-
-	// Dynamic = true allows streaming updates to GPU VBOs
-	rl.UploadMesh(&mesh, true)
-	defer rl.UnloadMesh(mesh)
-
-	material := rl.LoadMaterialDefault()
-	defer rl.UnloadMaterial(material)
-
-	camera := rl.Camera3D {
-		position   = {10, 10, 10}, // Camera position
-		//target = {0, 0, 0},      // Camera looking at point
-		up         = {0, 1, 0}, // Camera up vector (rotation towards target)
-		fovy       = 45, // Camera field-of-view Y
-		projection = .PERSPECTIVE, // Camera projection type
-	}
-
-	cube_pos := rl.Vector3{0, 0, 0}
-
-	rl.DisableCursor()
-
-
 	for !rl.WindowShouldClose() {
-
-		rl.UpdateCamera(&camera, .FREE)
 
 		if rl.IsWindowResized() {
 			window.width = rl.GetScreenWidth()
 			window.height = rl.GetScreenHeight()
 		}
 
-		// process user input
-
-		if rl.IsKeyPressed(.Z) {camera.target = {0, 0, 0}}
-		if rl.IsKeyPressed(.RIGHT) && vis.step < len(vis.steps) - 1 {
-			vis.step += 1
-		}
-		if rl.IsKeyPressed(.LEFT) && vis.step > 0 {
-			vis.step -= 1
-		}
-
-		// update world state
-
-		// Calculate cumulative vertices and triangles revealed up to current_step
-		active_tris: i32 = 0
-		active_verts: i32 = 0
-		for i in 0 ..= vis.step {
-			active_tris += vis.steps[i].tri_delta
-			active_verts += vis.steps[i].vert_delta
-		}
-
-		// Update Raylib rendering bounds
-		mesh.triangleCount = active_tris
-		mesh.vertexCount = active_tris * 3
-
 		rl.BeginDrawing()
 		rl.ClearBackground(rl.BLACK)
 
-		rl.BeginMode3D(camera)
-
-		rlgl.DisableBackfaceCulling()
-		rl.DrawMesh(mesh, material, rl.Matrix(1))
-
-		// Wireframe overlay for edge clarity
-		rl.DrawMesh(mesh, material, rl.Matrix(1))
-
-		rlgl.EnableBackfaceCulling()
-
-		// rl.DrawCube(cube_pos, 2, 2, 2, rl.RED)
-		// rl.DrawCubeWires(cube_pos, 2, 2, 2, rl.MAROON)
-		//
-		// rl.DrawGrid(10, 1)
-
-
-		rl.EndMode3D()
-		// Step HUD
-		step_info := vis.steps[vis.step]
-		rl.DrawText(
-			rl.TextFormat(
-				"Step %d/%d | Op: %v | Total Verts Known: %d | Tris: %d",
-				vis.step + 1,
-				len(vis.steps),
-				step_info.op,
-				active_verts,
-				active_tris,
-			),
-			20,
-			20,
-			20,
-			rl.DARKGRAY,
-		)
-
-		rl.DrawFPS(window.width - 50, 10)
+		switch app.page {
+		case .LOAD:
+			draw_load_layout(&app, window)
+		case .VIS:
+			draw_vis_layout(app, window)
+		}
 
 		rl.EndDrawing()
 	}
 }
+
+draw_load_layout :: proc(app: ^App, win: Window) {
+	// Header
+	rl.GuiLabel({40, 30, 500, 40}, "EdgeBreaker Visualizer")
+	rl.GuiLabel({40, 90, 500, 30}, "Load your mesh")
+
+	// Main panel
+	rl.GuiPanel({40, 135, 600, 250}, "Mesh input")
+
+	rl.GuiLabel({65, 180, 540, 30}, "Drag and drop an OBJ file into the window.")
+
+	if app.filename != nil {
+		rl.GuiLabel({65, 230, 540, 30}, app.filename)
+	}
+
+	if rl.GuiButton({65, 290, 180, 40}, "Use example mesh") {
+		app.filename = "../ebk/tetrahedron.obj"
+		app.page = .VIS
+	}
+
+	if rl.GuiButton({65, 340, 180, 40}, "Continue") {
+		if app.filename != nil {
+			app.page = .VIS
+			app.error_message = nil
+		} else {
+			app.error_message = "Uuuuh, no file selected..."
+			app.error_time = time.now()
+		}
+	}
+
+	// error message
+	if app.error_message != nil {
+		elapsed := time.since(app.error_time)
+
+		if elapsed < 3 * time.Second {
+			rl.DrawText(app.error_message, 65, 390, 16, rl.BLUE)
+		} else {
+			app.error_message = nil
+		}
+	}
+}
+
+draw_vis_layout :: proc(app: App, win: Window) {}
