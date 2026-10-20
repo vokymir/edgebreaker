@@ -1,8 +1,6 @@
 package corner_table
 
-import "core:math/linalg"
-
-Vec3 :: linalg.Vector3f32
+Vec3 :: [3]f32
 
 Corner :: distinct int
 INVALID_CORNER :: Corner(-1)
