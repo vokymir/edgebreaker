@@ -54,10 +54,13 @@ init_es :: proc(
 ) {
 	es.vertex_marks = make([]Mark, n_vertices, allocator, loc)
 	slice.fill(es.vertex_marks[:], Mark.NOT_VISITED)
+
 	es.next_boundary = make([]ct.Corner, 3 * n_triangles, allocator, loc)
 	slice.fill(es.next_boundary[:], ct.INVALID_CORNER)
+
 	es.prev_boundary = make([]ct.Corner, 3 * n_triangles, allocator, loc)
 	slice.fill(es.prev_boundary[:], ct.INVALID_CORNER)
+
 	es.gate_stack = make([dynamic]ct.Corner, allocator, loc)
 
 	es.predictor = predictor
@@ -134,11 +137,11 @@ Compress mesh represented via corner table and use Encoder_State.handler to
 handle (store/send) data.
 The encoder_state struct must be initialized before.
 */
-@(private)
-compress_ct :: proc(t: ct.Corner_Table, es: ^Encoder_State) -> (ok := false) {
+@(private, require_results)
+compress_ct :: proc(t: ct.Corner_Table, es: ^Encoder_State) -> (ok := false, em: ^Encoded_Mesh) {
 	log.debug(t.geometry)
 
-	em := new(Encoded_Mesh)
+	em = new(Encoded_Mesh)
 	init_em(em, len(t.vertices) / 3, len(t.geometry), es)
 
 	index, boundary_component, component_found := next_component(es.vertex_marks, t)
@@ -168,7 +171,9 @@ compress_ct :: proc(t: ct.Corner_Table, es: ^Encoder_State) -> (ok := false) {
 		// special case for open-meshes: must find boundary
 		if boundary_component {
 			log.debug("component has boundary")
-			find_all_boundary_edges(es, t, gate) or_return
+			if !find_all_boundary_edges(es, t, gate) {
+				return false, em
+			}
 		}
 
 		gate = initial_triangle(es, t, gate)
@@ -212,7 +217,7 @@ compress_ct :: proc(t: ct.Corner_Table, es: ^Encoder_State) -> (ok := false) {
 		)
 	}
 
-	return
+	return true, em
 }
 
 
