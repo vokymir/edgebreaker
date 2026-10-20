@@ -55,14 +55,15 @@ main :: proc() {
 		eb.init_es(&es, len(table.geometry), len(table.vertices))
 
 		fmt.println("compressing")
-		eb.compress(table, &es)
+		ok, em := eb.compress(table, &es)
+		eb.destroy_es(&es)
 		fmt.println("done")
 
-		for s in es.em.symbols {
+		for s in em.symbols {
 			fmt.print(s)
 		}
 		fmt.println()
-		for v in es.em.vertices {
+		for v in em.vertices {
 			fmt.println(v[0], v[1], v[2])
 		}
 	// encode
