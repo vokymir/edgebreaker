@@ -151,6 +151,8 @@ compress_ct :: proc(t: ct.Corner_Table, es: ^Encoder_State) -> (ok := false) {
 		// as in gate start & gate end
 		gs, on_boundary := ct.boundary_corner_of_vertex(t, ct.Vertex(index))
 		log.debug("gate is", on_boundary ? "" : "not", "on boundary")
+
+		// TODO: candidate for helper proc
 		if on_boundary {
 			ge := ct.next_corner(gs)
 			if !ct.vertex_is_on_boundary(t, ct.vertex_of_corner(t, ge)) {
@@ -174,6 +176,7 @@ compress_ct :: proc(t: ct.Corner_Table, es: ^Encoder_State) -> (ok := false) {
 		for gate != ct.INVALID_CORNER { 	// for all triangles in 1 component
 			assert_boundary_consistent(es^, t)
 			log.debug("gate is on corner", gate)
+
 			gs = ct.next_corner(gate)
 			ge = ct.prev_corner(gate)
 
@@ -236,9 +239,9 @@ initial_triangle :: proc(es: ^Encoder_State, t: ct.Corner_Table, v: ct.Corner) -
 	B_pos := ct.corner_position(t, dg)
 
 	// update flags
-	es.vertex_marks[ct.vertex_of_corner(t, dg)] = .VISITED
-	es.vertex_marks[ct.vertex_of_corner(t, gb)] = .VISITED
-	es.vertex_marks[ct.vertex_of_corner(t, bd)] = .VISITED
+	mark(es, t, dg, .VISITED)
+	mark(es, t, gb, .VISITED)
+	mark(es, t, bd, .VISITED)
 
 	bg := ct.opposite_corner(t, ct.next_corner(dg))
 	db := ct.opposite_corner(t, ct.prev_corner(dg))
@@ -250,36 +253,25 @@ initial_triangle :: proc(es: ^Encoder_State, t: ct.Corner_Table, v: ct.Corner) -
 		log.debug("i am in bounded mesh")
 		ge, _ := next_on_boundary(es^, t, dg)
 
-		es.next_boundary[ad] = db
-		es.next_boundary[db] = bg
-		es.next_boundary[bg] = ge
+		connect_boundary_chain(es, ad, db, bg, ge)
 
-		es.prev_boundary[ge] = bg
-		es.prev_boundary[bg] = db
-		es.prev_boundary[db] = ad
-
-		es.next_boundary[dg] = ct.INVALID_CORNER
-		es.prev_boundary[dg] = ct.INVALID_CORNER
+		remove_boundary_corner(es, dg)
 
 	} else { 	// for closed mesh
 		log.debug("i am in closed mesh")
 		gd := ct.opposite_corner(t, dg)
 
-		es.next_boundary[gd] = db
-		es.next_boundary[db] = bg
-		es.next_boundary[bg] = gd
-
-		es.prev_boundary[gd] = bg
-		es.prev_boundary[db] = gd
-		es.prev_boundary[bg] = db
+		connect_boundary_chain(es, gd, db, bg, gd)
 	}
 
 	if bounded_mesh {
-		append(&es.em.vertices, B_pos) // D & G already in
+		emit_vertex(es, B_pos) // D & G already in
 	} else {
-		append(&es.em.vertices, D_pos, G_pos, B_pos)
+		emit_vertex(es, D_pos)
+		emit_vertex(es, G_pos)
+		emit_vertex(es, B_pos)
 	}
-	append(&es.em.symbols, .C)
+	emit_symbol(es, .C) // TODO: is initial triangle C or what?
 
 	return bg
 }
@@ -300,14 +292,16 @@ Returns:
 C :: proc(es: ^Encoder_State, t: ct.Corner_Table, v: ct.Corner) -> ct.Corner {
 	log.debug("C")
 	dg := v
+
 	// calculate correction to prediction of next vertex
-	H_pos: Vec3
+	H_pos: Vec3 // TODO: candidate for helper
 	if v == ct.INVALID_CORNER || ct.opposite_corner(t, dg) == ct.INVALID_CORNER {
 		log.debug("cannot get position of H")
 		H_pos = {0, 0, 0}
 	} else {
 		H_pos = ct.corner_position(t, ct.opposite_corner(t, dg))
 	}
+
 	D_pos := ct.corner_position(t, ct.next_corner(dg))
 	G_pos := ct.corner_position(t, ct.prev_corner(dg))
 
@@ -315,7 +309,7 @@ C :: proc(es: ^Encoder_State, t: ct.Corner_Table, v: ct.Corner) -> ct.Corner {
 	correction := ct.corner_position(t, dg) - predicted_pos
 
 	// update flags
-	es.vertex_marks[ct.vertex_of_corner(t, dg)] = .VISITED
+	mark(es, t, dg, .VISITED)
 
 	// rewire boundary edges
 	ad, _ := prev_on_boundary(es^, t, dg)
@@ -324,19 +318,12 @@ C :: proc(es: ^Encoder_State, t: ct.Corner_Table, v: ct.Corner) -> ct.Corner {
 	db := ct.opposite_corner(t, ct.prev_corner(dg))
 	bg := ct.opposite_corner(t, ct.next_corner(dg))
 
-	es.next_boundary[ad] = db
-	es.next_boundary[db] = bg
-	es.next_boundary[bg] = ge
+	connect_boundary_chain(es, ad, db, bg, ge)
 
-	es.prev_boundary[ge] = bg
-	es.prev_boundary[bg] = db
-	es.prev_boundary[db] = ad
+	remove_boundary_corner(es, dg)
 
-	es.next_boundary[dg] = ct.INVALID_CORNER
-	es.prev_boundary[dg] = ct.INVALID_CORNER
-
-	append(&es.em.symbols, .C)
-	append(&es.em.vertices, correction)
+	emit_symbol(es, .C)
+	emit_vertex(es, correction)
 
 	return bg
 }
@@ -362,19 +349,13 @@ L :: proc(es: ^Encoder_State, t: ct.Corner_Table, v: ct.Corner) -> ct.Corner {
 	bg := ct.opposite_corner(t, ct.next_corner(dg))
 
 	// rewire: ab -> bg -> gh
-	es.prev_boundary[bg] = ab
-	es.next_boundary[bg] = gh
-
-	es.prev_boundary[gh] = bg
-	es.next_boundary[ab] = bg
+	connect_boundary_chain(es, ab, bg, gh)
 
 	// bd&dg are now not in boundary
-	es.prev_boundary[bd] = ct.INVALID_CORNER
-	es.next_boundary[bd] = ct.INVALID_CORNER
-	es.prev_boundary[dg] = ct.INVALID_CORNER
-	es.next_boundary[dg] = ct.INVALID_CORNER
+	remove_boundary_corner(es, bd)
+	remove_boundary_corner(es, dg)
 
-	append(&es.em.symbols, .L)
+	emit_symbol(es, .L)
 
 	return bg
 }
@@ -400,19 +381,13 @@ R :: proc(es: ^Encoder_State, t: ct.Corner_Table, v: ct.Corner) -> ct.Corner {
 	db := ct.opposite_corner(t, ct.prev_corner(dg))
 
 	// rewire: hd -> db -> be
-	es.prev_boundary[db] = hd
-	es.next_boundary[db] = be
-
-	es.prev_boundary[be] = db
-	es.next_boundary[hd] = db
+	connect_boundary_chain(es, hd, db, be)
 
 	// dg&gb are now not in boundary
-	es.prev_boundary[dg] = ct.INVALID_CORNER
-	es.next_boundary[dg] = ct.INVALID_CORNER
-	es.prev_boundary[gb] = ct.INVALID_CORNER
-	es.next_boundary[gb] = ct.INVALID_CORNER
+	remove_boundary_corner(es, dg)
+	remove_boundary_corner(es, gb)
 
-	append(&es.em.symbols, .R)
+	emit_symbol(es, .R)
 
 	return db
 }
@@ -448,25 +423,18 @@ S :: proc(es: ^Encoder_State, t: ct.Corner_Table, v: ct.Corner) -> ct.Corner {
 	bg := ct.opposite_corner(t, ct.next_corner(dg))
 
 	// rewire the right side (where alg. now continue)
-	es.prev_boundary[gi] = bg
-	es.next_boundary[bg] = gi
-	es.prev_boundary[bg] = fb
-	es.next_boundary[fb] = bg
+	connect_boundary_chain(es, fb, bg, gi)
 
 	// rewire the left side
-	es.prev_boundary[bc] = db
-	es.next_boundary[db] = bc
-	es.prev_boundary[db] = hd
-	es.next_boundary[hd] = db
+	connect_boundary_chain(es, hd, db, bc)
 
 	// break the dg edge (hehe, edgebreaker)
-	es.next_boundary[dg] = ct.INVALID_CORNER
-	es.prev_boundary[dg] = ct.INVALID_CORNER
+	remove_boundary_corner(es, dg)
 
 	// push the left edge on gate_stack
 	append(&es.gate_stack, db)
 
-	append(&es.em.symbols, .S)
+	emit_symbol(es, .S)
 
 	return bg
 }
@@ -486,15 +454,11 @@ E :: proc(es: ^Encoder_State, t: ct.Corner_Table, v: ct.Corner) -> ct.Corner {
 	gb := ct.next_corner(dg)
 	bd := ct.prev_corner(dg)
 
-	es.next_boundary[dg] = ct.INVALID_CORNER
-	es.next_boundary[gb] = ct.INVALID_CORNER
-	es.next_boundary[bd] = ct.INVALID_CORNER
+	remove_boundary_corner(es, dg)
+	remove_boundary_corner(es, gb)
+	remove_boundary_corner(es, bd)
 
-	es.prev_boundary[dg] = ct.INVALID_CORNER
-	es.prev_boundary[gb] = ct.INVALID_CORNER
-	es.prev_boundary[bd] = ct.INVALID_CORNER
-
-	append(&es.em.symbols, .E)
+	emit_symbol(es, .E)
 
 	new_gate := len(es.gate_stack) > 0 ? pop(&es.gate_stack) : ct.INVALID_CORNER
 
@@ -533,18 +497,17 @@ find_all_boundary_edges :: proc(
 		// 1. mark & emit current right vertex
 		bd := ct.prev_corner(dg)
 
-		es.vertex_marks[ct.vertex_of_corner(t, bd)] = .VISITED
-		pos := ct.corner_position(t, bd)
+		mark(es, t, bd, .VISITED)
 
-		append(&es.em.vertices, pos)
+		pos := ct.corner_position(t, bd)
+		emit_vertex(es, pos)
 
 		// 2. search one edge to the right (counter-clockwise)
 		ie, found := ct.next_boundary_corner(t, gi)
 		if !found {return false}
 
-		// 3. store link
-		es.prev_boundary[gi] = dg
-		es.next_boundary[dg] = gi
+		// 3. save link
+		connect_boundary(es, dg, gi)
 
 		// 4. advance to next edge
 		dg = gi
@@ -554,6 +517,38 @@ find_all_boundary_edges :: proc(
 	}
 
 	return true
+}
+
+/****************************** Rewiring helpers ******************************/
+
+connect_boundary :: proc(es: ^Encoder_State, from, to: ct.Corner) {
+	es.next_boundary[from] = to
+	es.prev_boundary[to] = from
+}
+
+remove_boundary_corner :: proc(es: ^Encoder_State, c: ct.Corner) {
+	es.next_boundary[c] = ct.INVALID_CORNER
+	es.prev_boundary[c] = ct.INVALID_CORNER
+}
+
+connect_boundary_chain :: proc(es: ^Encoder_State, corners: ..ct.Corner) {
+	for i in 0 ..< len(corners) - 1 {
+		connect_boundary(es, corners[i], corners[i + 1])
+	}
+}
+
+/******************************* Clarity helpers ******************************/
+
+mark :: proc(es: ^Encoder_State, t: ct.Corner_Table, c: ct.Corner, mark: Mark) {
+	es.vertex_marks[ct.vertex_of_corner(t, c)] = mark
+}
+
+emit_symbol :: proc(es: ^Encoder_State, symbol: Operation) {
+	append(&es.em.symbols, symbol)
+}
+
+emit_vertex :: proc(es: ^Encoder_State, pos_or_correction: Vector3) {
+	append(&es.em.vertices, pos_or_correction)
 }
 
 
