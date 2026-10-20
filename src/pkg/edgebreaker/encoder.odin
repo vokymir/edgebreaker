@@ -4,7 +4,6 @@ import ct "../corner_table"
 import "base:runtime"
 import "core:log"
 import "core:slice"
-import "core:time"
 
 @(private = "file")
 @(disabled = !ODIN_DEBUG)
@@ -22,6 +21,8 @@ assert_boundary_consistent :: proc(es: Encoder_State, t: ct.Corner_Table) {
 	}
 }
 
+Vector3 :: [3]f32
+
 /***************************** Structs ****************************************/
 
 Encoder_State :: struct {
@@ -37,17 +38,16 @@ Encoder_State :: struct {
 	// store the opposite corner in the same triangle (ie the v corner)
 	gate_stack:    [dynamic]ct.Corner,
 
-	// handle CLERS operations output
-	handler:       Encoder_Stream_Handler,
-
 	// predicts position of next vertex
 	predictor:     Predictor,
+
+	// ptr to resulting mesh
+	em:            ^Encoded_Mesh,
 }
 
 init_es :: proc(
 	es: ^Encoder_State,
 	n_vertices, n_triangles: int,
-	handler := Print_Handler,
 	predictor := Predictor_None,
 	allocator := context.allocator,
 	loc := #caller_location,
@@ -60,13 +60,12 @@ init_es :: proc(
 	slice.fill(es.prev_boundary[:], ct.INVALID_CORNER)
 	es.gate_stack = make([dynamic]ct.Corner, allocator, loc)
 
-	es.handler = handler
 	es.predictor = predictor
 	es.allocator = allocator
 }
 
 /*
-WARN: caller must deallocate handler & predictor
+WARN: caller must deallocate predictor (if necessary)
 */
 destroy_es :: proc(es: ^Encoder_State, loc := #caller_location) {
 	delete(es.vertex_marks, es.allocator, loc)
@@ -75,14 +74,45 @@ destroy_es :: proc(es: ^Encoder_State, loc := #caller_location) {
 	delete(es.gate_stack, loc)
 }
 
+/*
+Store the encoded mesh as a sequence of consecutive CLERS symbols and a list of
+all vertices in the order of appeareance.
+*/
+Encoded_Mesh :: struct {
+	symbols:  [dynamic]Operation,
+	vertices: [dynamic]Vector3,
+}
+
+init_em :: proc(
+	em: ^Encoded_Mesh,
+	n_symbols: int = 0,
+	n_vertices: int = 0,
+	es: ^Encoder_State = nil,
+	allocator := context.allocator,
+	loc := #caller_location,
+) {
+	em.symbols = make([dynamic]Operation, 0, n_symbols, allocator, loc)
+	em.vertices = make([dynamic]Vector3, 0, n_vertices, allocator, loc)
+
+	if es != nil {
+		es.em = em
+	}
+}
+
+destroy_em :: proc(em: ^Encoded_Mesh, loc := #caller_location) {
+	delete(em.symbols, loc)
+	delete(em.vertices, loc)
+}
+
 Operation :: enum {
+	// finds new vertex
 	C, // create
+	// traverse the spanning tree
 	L, // left
 	R, // right
+	// parantheses
 	S, // split
 	E, // end
-	BOUNDARY_VERTEX, // emitting boundary vertex
-	INITIAL_TRIANGLE,
 }
 
 /*
@@ -107,6 +137,10 @@ The encoder_state struct must be initialized before.
 @(private)
 compress_ct :: proc(t: ct.Corner_Table, es: ^Encoder_State) -> (ok := false) {
 	log.debug(t.geometry)
+
+	em := new(Encoded_Mesh)
+	init_em(em, len(t.vertices) / 3, len(t.geometry), es)
+
 	index, boundary_component, component_found := next_component(es.vertex_marks, t)
 
 	for component_found { 	// for all components
@@ -211,7 +245,8 @@ initial_triangle :: proc(es: ^Encoder_State, t: ct.Corner_Table, v: ct.Corner) -
 
 	// rewire boundary edges
 	// for bounded mesh
-	if ad, bounded_mesh := prev_on_boundary(es^, t, dg); bounded_mesh {
+	ad, bounded_mesh := prev_on_boundary(es^, t, dg)
+	if bounded_mesh {
 		log.debug("i am in bounded mesh")
 		ge, _ := next_on_boundary(es^, t, dg)
 
@@ -239,10 +274,12 @@ initial_triangle :: proc(es: ^Encoder_State, t: ct.Corner_Table, v: ct.Corner) -
 		es.prev_boundary[bg] = db
 	}
 
-	emit_step(
-		es,
-		{op = .INITIAL_TRIANGLE, data = Init_Triangle_Data{gs = D_pos, ge = G_pos, v = B_pos}},
-	)
+	if bounded_mesh {
+		append(&es.em.vertices, B_pos) // D & G already in
+	} else {
+		append(&es.em.vertices, D_pos, G_pos, B_pos)
+	}
+	append(&es.em.symbols, .C)
 
 	return bg
 }
@@ -298,7 +335,8 @@ C :: proc(es: ^Encoder_State, t: ct.Corner_Table, v: ct.Corner) -> ct.Corner {
 	es.next_boundary[dg] = ct.INVALID_CORNER
 	es.prev_boundary[dg] = ct.INVALID_CORNER
 
-	emit_step(es, {op = .C, data = C_Data{correction}})
+	append(&es.em.symbols, .C)
+	append(&es.em.vertices, correction)
 
 	return bg
 }
@@ -336,7 +374,7 @@ L :: proc(es: ^Encoder_State, t: ct.Corner_Table, v: ct.Corner) -> ct.Corner {
 	es.prev_boundary[dg] = ct.INVALID_CORNER
 	es.next_boundary[dg] = ct.INVALID_CORNER
 
-	emit_step(es, {op = .L, data = L_Data{}})
+	append(&es.em.symbols, .L)
 
 	return bg
 }
@@ -374,7 +412,7 @@ R :: proc(es: ^Encoder_State, t: ct.Corner_Table, v: ct.Corner) -> ct.Corner {
 	es.prev_boundary[gb] = ct.INVALID_CORNER
 	es.next_boundary[gb] = ct.INVALID_CORNER
 
-	emit_step(es, {op = .R, data = R_Data{}})
+	append(&es.em.symbols, .R)
 
 	return db
 }
@@ -428,7 +466,8 @@ S :: proc(es: ^Encoder_State, t: ct.Corner_Table, v: ct.Corner) -> ct.Corner {
 	// push the left edge on gate_stack
 	append(&es.gate_stack, db)
 
-	emit_step(es, {op = .S, data = S_Data{}})
+	append(&es.em.symbols, .S)
+
 	return bg
 }
 
@@ -455,7 +494,7 @@ E :: proc(es: ^Encoder_State, t: ct.Corner_Table, v: ct.Corner) -> ct.Corner {
 	es.prev_boundary[gb] = ct.INVALID_CORNER
 	es.prev_boundary[bd] = ct.INVALID_CORNER
 
-	emit_step(es, {op = .E, data = E_Data{}})
+	append(&es.em.symbols, .E)
 
 	new_gate := len(es.gate_stack) > 0 ? pop(&es.gate_stack) : ct.INVALID_CORNER
 
@@ -497,7 +536,7 @@ find_all_boundary_edges :: proc(
 		es.vertex_marks[ct.vertex_of_corner(t, bd)] = .VISITED
 		pos := ct.corner_position(t, bd)
 
-		emit_step(es, {op = .BOUNDARY_VERTEX, data = Boundary_Data{pos}})
+		append(&es.em.vertices, pos)
 
 		// 2. search one edge to the right (counter-clockwise)
 		ie, found := ct.next_boundary_corner(t, gi)

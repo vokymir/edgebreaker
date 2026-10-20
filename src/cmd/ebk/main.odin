@@ -50,14 +50,21 @@ main :: proc() {
 			panic("invalid output path")
 		}
 		defer os.close(f)
-		eb.Save_Text_Handler.user_data = f
 
 		es: eb.Encoder_State
-		eb.init_es(&es, len(table.geometry), len(table.vertices), eb.Save_Text_Handler)
+		eb.init_es(&es, len(table.geometry), len(table.vertices))
 
 		fmt.println("compressing")
 		eb.compress(table, &es)
 		fmt.println("done")
+
+		for s in es.em.symbols {
+			fmt.print(s)
+		}
+		fmt.println()
+		for v in es.em.vertices {
+			fmt.println(v[0], v[1], v[2])
+		}
 	// encode
 	case ".ebk":
 	//decode
