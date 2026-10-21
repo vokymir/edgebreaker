@@ -8,6 +8,9 @@ INVALID_CORNER :: Corner(-1)
 Vertex :: distinct int
 INVALID_VERTEX :: Vertex(-1)
 
+Triangle :: distinct int
+INVALID_TRIANGLE :: Triangle(-1)
+
 /*
 Represents a triangle mesh in a corner table.
 */
@@ -64,8 +67,9 @@ vertex_of_corner :: #force_inline proc(ct: Corner_Table, c: Corner) -> Vertex {
 }
 
 // return index of triangle containing corner c
-triangle_of_corner :: #force_inline proc(c: Corner) -> int {
-	return int(c) / 3
+triangle_of_corner :: #force_inline proc(c: Corner) -> Triangle {
+	if c == INVALID_CORNER {return INVALID_TRIANGLE}
+	return Triangle(c / 3)
 }
 
 // returns the 3D coordinates of corner c
