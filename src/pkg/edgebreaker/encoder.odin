@@ -7,24 +7,30 @@ import "core:slice"
 
 Vector3 :: [3]f32
 
+// TODO: write assert
+// Per component, assert that the number of topology entries equals 2 − χ
+// (or 1 − χ if the component has a boundary).
+
 /***************************** Structs ****************************************/
 
 Encoder_State :: struct {
 	// for destroy
-	allocator:    runtime.Allocator,
+	allocator:     runtime.Allocator,
 
 	// as many as vertices, ordered as in ct.geometry
-	vertex_marks: []Mark,
+	vertex_marks:  []Mark,
 	// in which step a triangle was discovered (0=never)
-	tri_step:     []int,
+	tri_step:      []int,
 	// store the opposite corner in the same triangle (ie the v corner)
-	gate_stack:   [dynamic]ct.Corner,
+	gate_stack:    [dynamic]ct.Corner,
+	// store S step -> number of hole vertices
+	hole_len_of_s: map[int]int,
 
 	// predicts position of next vertex
-	predictor:    Predictor,
+	predictor:     Predictor,
 
 	// ptr to resulting mesh
-	em:           ^Encoded_Mesh,
+	em:            ^Encoded_Mesh,
 }
 
 init_es :: proc(
@@ -161,6 +167,7 @@ compress_ct :: proc(t: ct.Corner_Table, es: ^Encoder_State) -> (ok := false, em:
 		gate := ct.next_corner(ge)
 
 		// special case for open-meshes: must find boundary
+		// TODO: redo so it handles also holes
 		if boundary_component {
 			log.debug("component has boundary")
 			if !find_all_boundary_edges(es, t, gate) {
@@ -171,11 +178,12 @@ compress_ct :: proc(t: ct.Corner_Table, es: ^Encoder_State) -> (ok := false, em:
 		// TODO: process gate as pure C???
 		// gate = initial_triangle(es, t, gate)
 
+		// TODO: decomposition
 		for gate != ct.INVALID_CORNER { 	// for all triangles in 1 component
 			log.debug("gate is on corner", gate)
 
 			step := len(es.em.symbols)
-			// TODO: check handles
+			check_handles(es, t, gate)
 			es.tri_step[ct.triangle_of_corner(gate)] = step + 1
 
 			right := ct.opposite_corner(t, ct.next_corner(gate))
@@ -189,7 +197,7 @@ compress_ct :: proc(t: ct.Corner_Table, es: ^Encoder_State) -> (ok := false, em:
 				gate = C(es, t, gate)
 			case right_done && left_done:
 				emit_symbol(es, .E)
-				gate = pop_unvisited(es) // TODO: implement
+				gate = pop_unvisited(es)
 			case right_done:
 				emit_symbol(es, .R); gate = left
 			case left_done:
@@ -212,19 +220,72 @@ compress_ct :: proc(t: ct.Corner_Table, es: ^Encoder_State) -> (ok := false, em:
 	return true, em
 }
 
-
-// TODO
 C :: proc(es: ^Encoder_State, t: ct.Corner_Table, gate: ct.Corner) -> ct.Corner {
-	return ct.INVALID_CORNER
+	emit_symbol(es, .C)
+	emit_vertex(es, ct.corner_position(t, gate))
+
+	mark(es, t, gate, .VISITED)
+
+	right := ct.opposite_corner(t, ct.next_corner(gate))
+	return right
 }
 
-// TODO
+// TODO: impl
+// should it gets step or calculate by itself?
 S :: proc(es: ^Encoder_State, t: ct.Corner_Table, gate: ct.Corner) -> ct.Corner {
+
+	if is_marked(es^, t, gate, .HOLE) {
+
+		// find all hole vertices & mark with VISITED
+		// store es.hole_len_of_s[step] = ...
+		// convention: triangle gate is 0, next is 1, next-next(=prev) is 2
+		// TODO: mention this convention somewhere
+	}
+
 	return ct.INVALID_CORNER
 }
 
-// TODO
-pop_unvisited :: proc(es: ^Encoder_State) -> ct.Corner {return ct.INVALID_CORNER}
+check_handles :: proc(es: ^Encoder_State, t: ct.Corner_Table, gate: ct.Corner, step: int) {
+	// the two non-gate edges: (corner next(gate), k=1) is the right edge,
+	// (corner prev(gate), k=2) is the left edge
+	sides := [2]struct {
+		edge_corner: ct.Corner,
+		k:           ct.Corner,
+	}{{ct.next_corner(gate), 1}, {ct.prev_corner(gate), 2}}
+
+	for s in sides {
+		n := ct.opposite_corner(t, s.edge_corner)
+		if n == ct.INVALID_CORNER {continue} 	// mesh border
+
+		n_step := es.tri_step[ct.triangle_of_corner(n)]
+		if n_step == 0 {continue} 	// not visited yet
+		if es.em.symbols[n_step - 1] != .S {continue}
+
+		// reached an S triangle from the side: this can only be its left edge
+		append(
+			&es.em.topology,
+			Topology_Entry {
+				s_corner       = ct.Corner(3 * (n_step - 1) + 2),
+				arrival_corner = ct.Corner(3 * step + int(s.k)),
+				hole_len       = es.hole_len_of_s[n_step - 1], // 0 if absent
+			},
+		)
+	}
+
+}
+
+pop_unvisited :: proc(es: ^Encoder_State) -> ct.Corner {
+	for {
+		if len(es.gate_stack) == 0 {return ct.INVALID_CORNER}
+
+		candidate := pop(&es.gate_stack)
+
+		// TODO: candidate for clarity proc
+		if es.tri_step[ct.triangle_of_corner(candidate)] == 0 {
+			return candidate
+		}
+	}
+}
 
 /****************************** General decomposition *************************/
 
@@ -298,7 +359,6 @@ emit_symbol :: proc(es: ^Encoder_State, symbol: Operation) {
 emit_vertex :: proc(es: ^Encoder_State, pos_or_correction: Vector3) {
 	append(&es.em.vertices, pos_or_correction)
 }
-
 
 /****************************** Traversal helpers *****************************/
 
