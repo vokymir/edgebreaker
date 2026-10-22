@@ -146,25 +146,15 @@ compress_ct :: proc(t: ct.Corner_Table, es: ^Encoder_State) -> (ok := false, em:
 
 	for component_found { 	// for all components
 		log.debug("component found on", index)
+
 		//     v                             v      which is handled
 		//   /  \     OR this may happen:  /  \     in the if on_boundary{}
 		// gs -- ge                      ge -- gs   case
 		// as in gate start & gate end
 		gs, on_boundary := ct.boundary_corner_of_vertex(t, ct.Vertex(index))
-		log.debug("gate is", on_boundary ? "" : "not", "on boundary")
+		gate := gate_from_corner(t, on_boundary, gs)
 
-		// TODO: candidate for helper proc
-		if on_boundary {
-			ge := ct.next_corner(gs)
-			if !ct.vertex_is_on_boundary(t, ct.vertex_of_corner(t, ge)) {
-				// here ge is in fact v therefore gs is:
-				gs = ct.prev_corner(gs)
-			}
-		} else { 	// take any from the triangle
-			gs = ct.corner_of_vertex(t, ct.Vertex(index))
-		}
-		ge := ct.next_corner(gs)
-		gate := ct.next_corner(ge)
+		log.debug("gate is", on_boundary ? "" : "not", "on boundary")
 
 		// special case for open-meshes: must find boundary
 		// TODO: redo so it handles also holes
@@ -183,7 +173,7 @@ compress_ct :: proc(t: ct.Corner_Table, es: ^Encoder_State) -> (ok := false, em:
 			log.debug("gate is on corner", gate)
 
 			step := len(es.em.symbols)
-			check_handles(es, t, gate)
+			check_handles(es, t, gate, step)
 			es.tri_step[ct.triangle_of_corner(gate)] = step + 1
 
 			right := ct.opposite_corner(t, ct.next_corner(gate))
@@ -405,4 +395,30 @@ next_component :: proc(
 
 	log.debug("not found")
 	return -1, false, false
+}
+
+/*
+From a corner which might be on boundary return the corresponding gate vertex.
+*/
+@(private = "file")
+gate_from_corner :: proc(
+	t: ct.Corner_Table,
+	is_on_boundary: bool,
+	c: ct.Corner,
+) -> (
+	gate: ct.Corner,
+) {
+	gs := c // take any corner as gate_start from the triangle
+
+	if is_on_boundary {
+		ge := ct.next_corner(gs)
+		// if ge is in fact gate, move gs
+		if !ct.vertex_is_on_boundary(t, ct.vertex_of_corner(t, ge)) {
+			gs = ct.prev_corner(gs)
+		}
+		// else is gs correct & no need to do anything
+	}
+
+	gate = ct.prev_corner(gs)
+	return gate
 }
