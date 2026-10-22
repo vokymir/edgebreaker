@@ -183,6 +183,12 @@ vertex_is_on_boundary :: proc(ct: Corner_Table, v: Vertex) -> bool {
 	return found
 }
 
+// TODO: update to not need vertex at all...
+c_on_boundary :: proc(ct: Corner_Table, c: Corner) -> bool {
+	_, found := boundary_corner_of_vertex(ct, vertex_of_corner(ct, c))
+	return found
+}
+
 /*
 Returns:
 - c: corner for which the left_corner() returns INVALID_CORNER, ie left-most

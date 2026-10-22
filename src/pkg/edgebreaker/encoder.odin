@@ -136,11 +136,13 @@ The encoder_state struct must be initialized before.
 The caller is responsible for freeing returned em.
 */
 @(private, require_results)
-compress_ct :: proc(t: ct.Corner_Table, es: ^Encoder_State) -> (ok := false, em: ^Encoded_Mesh) {
+compress_ct :: proc(es: ^Encoder_State, t: ct.Corner_Table) -> (ok := false, em: ^Encoded_Mesh) {
 	log.debug(t.geometry)
 
 	em = new(Encoded_Mesh)
 	init_em(em, len(t.vertices) / 3, len(t.geometry), es)
+
+	mark_all_holes(es, t)
 
 	index, boundary_component, component_found := next_component(es.vertex_marks, t)
 
@@ -156,47 +158,7 @@ compress_ct :: proc(t: ct.Corner_Table, es: ^Encoder_State) -> (ok := false, em:
 
 		log.debug("gate is", on_boundary ? "" : "not", "on boundary")
 
-		// special case for open-meshes: must find boundary
-		// TODO: redo so it handles also holes
-		if boundary_component {
-			log.debug("component has boundary")
-			if !find_all_boundary_edges(es, t, gate) {
-				return false, em
-			}
-		}
-
-		// TODO: process gate as pure C???
-		// gate = initial_triangle(es, t, gate)
-
-		// TODO: decomposition
-		for gate != ct.INVALID_CORNER { 	// for all triangles in 1 component
-			log.debug("gate is on corner", gate)
-
-			step := len(es.em.symbols)
-			check_handles(es, t, gate, step)
-			es.tri_step[ct.triangle_of_corner(gate)] = step + 1
-
-			right := ct.opposite_corner(t, ct.next_corner(gate))
-			left := ct.opposite_corner(t, ct.prev_corner(gate))
-			right_done :=
-				right == ct.INVALID_CORNER || es.tri_step[ct.triangle_of_corner(right)] != 0
-			left_done := left == ct.INVALID_CORNER || es.tri_step[ct.triangle_of_corner(left)] != 0
-
-			switch {
-			case is_marked(es^, t, gate, .NOT_VISITED):
-				gate = C(es, t, gate)
-			case right_done && left_done:
-				emit_symbol(es, .E)
-				gate = pop_unvisited(es)
-			case right_done:
-				emit_symbol(es, .R); gate = left
-			case left_done:
-				emit_symbol(es, .L); gate = right
-			case:
-				gate = S(es, t, gate)
-			}
-
-		} // while the current vertex is in any not visited triangle
+		compress_component(es, t, gate)
 
 		// find another unvisited vertex, ie another mesh
 		index, boundary_component, component_found = next_component(
@@ -208,6 +170,37 @@ compress_ct :: proc(t: ct.Corner_Table, es: ^Encoder_State) -> (ok := false, em:
 	}
 
 	return true, em
+}
+
+compress_component :: proc(es: ^Encoder_State, t: ct.Corner_Table, gate: ct.Corner) {
+	gate := gate
+
+	for gate != ct.INVALID_CORNER { 	// for all triangles in 1 component
+		log.debug("gate is on corner", gate)
+
+		step := len(es.em.symbols)
+		check_handles(es, t, gate, step)
+		es.tri_step[ct.triangle_of_corner(gate)] = step + 1
+
+		right := ct.opposite_corner(t, ct.next_corner(gate))
+		left := ct.opposite_corner(t, ct.prev_corner(gate))
+		right_done := right == ct.INVALID_CORNER || es.tri_step[ct.triangle_of_corner(right)] != 0
+		left_done := left == ct.INVALID_CORNER || es.tri_step[ct.triangle_of_corner(left)] != 0
+
+		switch {
+		case is_marked(es^, t, gate, .NOT_VISITED):
+			gate = C(es, t, gate)
+		case right_done && left_done:
+			emit_symbol(es, .E)
+			gate = pop_unvisited(es)
+		case right_done:
+			emit_symbol(es, .R); gate = left
+		case left_done:
+			emit_symbol(es, .L); gate = right
+		case:
+			gate = S(es, t, gate)
+		}
+	} // while the current vertex is in any not visited triangle
 }
 
 C :: proc(es: ^Encoder_State, t: ct.Corner_Table, gate: ct.Corner) -> ct.Corner {
@@ -280,56 +273,19 @@ pop_unvisited :: proc(es: ^Encoder_State) -> ct.Corner {
 /****************************** General decomposition *************************/
 
 /*
-Find all boundary edges (ie corners which are in the same triangle and opposite
-to those edges. Mark their vertices as .VISITED and emit their position starting
-with G counter-clockwise to D.
+Mark all holes in the whole mesh, in all components, as .HOLE.
 
-      C    F      'initial' is the corner "under" B, ie D--G
-    /  \ /  \     all other corners/edges will there be referenced
-   A -- B -- E    by their vertices LETTERS - orientation may be
-  / \  /x\  / \   induced as every triangle is counter clock-wise oriented
-H -- D -- G -- I
-
+Complexity: theta(n)
 */
-// TODO: rework for new style
 @(private = "file")
-find_all_boundary_edges :: proc(
-	es: ^Encoder_State,
-	t: ct.Corner_Table,
-	initial: ct.Corner,
-) -> (
-	ok: bool,
-) {
-	if initial == ct.INVALID_CORNER {return false}
+mark_all_holes :: proc(es: ^Encoder_State, t: ct.Corner_Table) {
 
-	dg := initial
-	gi, found := ct.next_boundary_corner(t, dg)
-	if !found {return false}
+	for c in t.vertex_corners {
 
-	for {
-		// 1. mark & emit current right vertex
-		bd := ct.prev_corner(dg)
-
-		mark(es, t, bd, .VISITED)
-
-		pos := ct.corner_position(t, bd)
-		emit_vertex(es, pos)
-
-		// 2. search one edge to the right (counter-clockwise)
-		ie, found := ct.next_boundary_corner(t, gi)
-		if !found {return false}
-
-		// 3. save link
-		// connect_boundary(es, dg, gi)
-
-		// 4. advance to next edge
-		dg = gi
-		gi = ie
-
-		if dg == initial {break}
+		if ct.c_on_boundary(t, c) {
+			mark(es, t, c, .HOLE)
+		}
 	}
-
-	return true
 }
 
 /******************************* Clarity helpers ******************************/

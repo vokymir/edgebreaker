@@ -55,7 +55,7 @@ main :: proc() {
 		eb.init_es(&es, len(table.geometry), len(table.vertices))
 
 		fmt.println("compressing")
-		ok, em := eb.compress(table, &es)
+		ok, em := eb.compress(&es, table)
 		eb.destroy_es(&es)
 		fmt.println("done")
 
