@@ -192,7 +192,7 @@ compress_component :: proc(es: ^Encoder_State, t: ct.Corner_Table, gate: ct.Corn
 		case left_done:
 			emit_symbol(es, .L); gate = right
 		case:
-			gate = S(es, t, gate)
+			gate = S(es, t, gate, step)
 		}
 	} // while the current vertex is in any not visited triangle
 }
@@ -209,12 +209,14 @@ C :: proc(es: ^Encoder_State, t: ct.Corner_Table, gate: ct.Corner) -> ct.Corner 
 
 // TODO: impl
 // should it gets step or calculate by itself?
-S :: proc(es: ^Encoder_State, t: ct.Corner_Table, gate: ct.Corner) -> ct.Corner {
+S :: proc(es: ^Encoder_State, t: ct.Corner_Table, gate: ct.Corner, step: int) -> ct.Corner {
 
 	if is_marked(es^, t, gate, .HOLE) {
 
 		// find all hole vertices & mark with VISITED
 		// store es.hole_len_of_s[step] = ...
+		holes_count := 0 // TMP
+		es.hole_len_of_s[step] = holes_count
 		// convention: triangle gate is 0, next is 1, next-next(=prev) is 2
 		// TODO: mention this convention somewhere
 	}
