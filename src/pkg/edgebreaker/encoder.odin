@@ -144,29 +144,23 @@ compress_ct :: proc(es: ^Encoder_State, t: ct.Corner_Table) -> (ok := false, em:
 
 	mark_all_holes(es, t)
 
-	index, boundary_component, component_found := next_component(es.vertex_marks, t)
+	index := 0
+	has_boundary := true
 
-	for component_found { 	// for all components
+	for index, has_boundary in next_component(es^, t, index, has_boundary) {
 		log.debug("component found on", index)
 
-		//     v                             v      which is handled
-		//   /  \     OR this may happen:  /  \     in the if on_boundary{}
-		// gs -- ge                      ge -- gs   case
-		// as in gate start & gate end
-		gs, on_boundary := ct.boundary_corner_of_vertex(t, ct.Vertex(index))
-		gate := gate_from_corner(t, on_boundary, gs)
-
-		log.debug("gate is", on_boundary ? "" : "not", "on boundary")
+		gate := ct.corner_of_vertex(t, ct.Vertex(index))
+		if has_boundary {
+			//     v                             v      which is handled
+			//   /  \     OR this may happen:  /  \     in the gate_from_corner()
+			// gs -- ge                      ge -- gs   case
+			// as in gate start & gate end
+			gs, _ := ct.boundary_corner_of_vertex(t, ct.Vertex(index))
+			gate = gate_from_corner(t, gs)
+		}
 
 		compress_component(es, t, gate)
-
-		// find another unvisited vertex, ie another mesh
-		index, boundary_component, component_found = next_component(
-			es.vertex_marks,
-			t,
-			index,
-			boundary_component,
-		)
 	}
 
 	return true, em
@@ -318,7 +312,7 @@ Returns:
 */
 @(private = "file")
 next_component :: proc(
-	marks: []Mark,
+	es: Encoder_State,
 	t: ct.Corner_Table,
 	start := 0,
 	search_first_for_boundary := true,
@@ -328,6 +322,7 @@ next_component :: proc(
 	found: bool,
 ) {
 	start := start
+	marks := es.vertex_marks
 
 	log.debug(marks)
 	if search_first_for_boundary {
@@ -357,23 +352,16 @@ next_component :: proc(
 From a corner which might be on boundary return the corresponding gate vertex.
 */
 @(private = "file")
-gate_from_corner :: proc(
-	t: ct.Corner_Table,
-	is_on_boundary: bool,
-	c: ct.Corner,
-) -> (
-	gate: ct.Corner,
-) {
+gate_from_corner :: proc(t: ct.Corner_Table, c: ct.Corner) -> (gate: ct.Corner) {
 	gs := c // take any corner as gate_start from the triangle
 
-	if is_on_boundary {
-		ge := ct.next_corner(gs)
-		// if ge is in fact gate, move gs
-		if !ct.vertex_is_on_boundary(t, ct.vertex_of_corner(t, ge)) {
-			gs = ct.prev_corner(gs)
-		}
-		// else is gs correct & no need to do anything
+	ge := ct.next_corner(gs)
+
+	// if ge is in fact gate, move gs
+	if !ct.vertex_is_on_boundary(t, ct.vertex_of_corner(t, ge)) {
+		gs = ct.prev_corner(gs)
 	}
+	// else is gs correct & no need to do anything
 
 	gate = ct.prev_corner(gs)
 	return gate
