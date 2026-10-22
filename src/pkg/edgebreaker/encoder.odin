@@ -174,7 +174,7 @@ compress_component :: proc(es: ^Encoder_State, t: ct.Corner_Table, gate: ct.Corn
 
 		step := len(es.em.symbols)
 		check_handles(es, t, gate, step)
-		es.tri_step[ct.triangle_of_corner(gate)] = step + 1
+		tri_step(es, gate, step + 1)
 
 		right := ct.opposite_corner(t, ct.next_corner(gate))
 		left := ct.opposite_corner(t, ct.prev_corner(gate))
@@ -257,8 +257,7 @@ pop_unvisited :: proc(es: ^Encoder_State) -> ct.Corner {
 
 		candidate := pop(&es.gate_stack)
 
-		// TODO: candidate for clarity proc
-		if es.tri_step[ct.triangle_of_corner(candidate)] == 0 {
+		if tri_step_eq(es^, candidate, 0) {
 			return candidate
 		}
 	}
@@ -290,6 +289,14 @@ mark :: proc(es: ^Encoder_State, t: ct.Corner_Table, c: ct.Corner, mark: Mark) {
 
 is_marked :: proc(es: Encoder_State, t: ct.Corner_Table, c: ct.Corner, mark: Mark) -> bool {
 	return es.vertex_marks[ct.vertex_of_corner(t, c)] == mark
+}
+
+tri_step :: proc(es: ^Encoder_State, gate: ct.Corner, step: int) {
+	es.tri_step[ct.triangle_of_corner(gate)] = step
+}
+
+tri_step_eq :: proc(es: Encoder_State, c: ct.Corner, step: int) -> bool {
+	return es.tri_step[ct.triangle_of_corner(c)] == step
 }
 
 emit_symbol :: proc(es: ^Encoder_State, symbol: Operation) {
