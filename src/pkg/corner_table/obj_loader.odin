@@ -46,7 +46,7 @@ load_obj_to_ct :: proc(
 	for line in strings.split_lines_iterator(&it) {
 		// ok to handwave, doesn't handle all line-types in .obj file, therefore
 		// many lines are 'invalid'
-		_ = process_line(ct, line)
+		_ = process_line(ct, line, allocator, loc)
 	}
 
 	// part 2:
@@ -66,15 +66,22 @@ Returns:
 - ok: false if anything bad happens
 */
 @(private = "file")
-process_line :: proc(ct: ^Corner_Table, line: string) -> (ok := false) {
+process_line :: proc(
+	ct: ^Corner_Table,
+	line: string,
+	allocator := context.allocator,
+	loc := #caller_location,
+) -> (
+	ok := false,
+) {
 	if len(line) < 2 {
 		return
 	}
 	switch line[0:2] {
 	case "v ":
-		ok = process_vertex(ct, line)
+		ok = process_vertex(ct, line, allocator, loc)
 	case "f ":
-		ok = process_face(ct, line)
+		ok = process_face(ct, line, allocator, loc)
 	}
 
 	return
@@ -91,8 +98,16 @@ Returns:
 - ok: false if invalid line or parsing fail
 */
 @(private = "file")
-process_vertex :: proc(ct: ^Corner_Table, line: string) -> (ok := false) {
-	tokens := strings.split(line, " ")
+process_vertex :: proc(
+	ct: ^Corner_Table,
+	line: string,
+	allocator := context.allocator,
+	loc := #caller_location,
+) -> (
+	ok := false,
+) {
+	tokens := strings.fields(line, allocator, loc)
+	defer delete(tokens, allocator)
 	if len(tokens) < 4 || len(tokens) > 5 {
 		return
 	}
@@ -123,19 +138,37 @@ Returns:
 - ok: false if invalid line or parsing fail
 */
 @(private = "file")
-process_face :: proc(ct: ^Corner_Table, line: string) -> (ok := false) {
-	tokens := strings.split(line, " ")
+process_face :: proc(
+	ct: ^Corner_Table,
+	line: string,
+	allocator := context.allocator,
+	loc := #caller_location,
+) -> (
+	ok := false,
+) {
+	tokens := strings.fields(line, allocator, loc)
+	defer delete(tokens, allocator)
 	if len(tokens) < 4 {
 		return
 	}
 
 	v1 := parse_face_vertex(tokens[1]) or_return
+	if int(v1) < 0 || int(v1) >= len(ct.pos) {
+		return
+	}
 
 	// support any polygon by splitting it inside multiple triangles coincident
 	// with the vertex v1
 	for i := 3; i < len(tokens); i += 1 {
 		v2 := parse_face_vertex(tokens[i - 1]) or_return
 		v3 := parse_face_vertex(tokens[i]) or_return
+
+		if int(v2) < 0 || int(v2) >= len(ct.pos) {
+			return
+		}
+		if int(v3) < 0 || int(v3) >= len(ct.pos) {
+			return
+		}
 
 		append(&ct.tris, v1, v2, v3)
 	}
@@ -158,7 +191,14 @@ Returns:
 @(private = "file")
 parse_face_vertex :: proc(str: string) -> (v: Vertex, ok := false) {
 	tokens := strings.split(str, "/")
+	if len(tokens) == 0 || len(tokens[0]) == 0 {
+		return
+	}
+
 	v_int := strconv.parse_int(tokens[0]) or_return
+	if v_int == 0 {
+		return
+	}
 
 	// the -1 is important, in .obj the vertices are 1-indexed
 	v = Vertex(v_int - 1)
