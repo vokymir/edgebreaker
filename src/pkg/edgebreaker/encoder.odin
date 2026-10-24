@@ -209,7 +209,24 @@ compress_component :: proc(es: ^Encoder_State, t: ct.Corner_Table, gate: ct.Corn
 
 C :: proc(es: ^Encoder_State, t: ct.Corner_Table, gate: ct.Corner) -> ct.Corner {
 	emit_symbol(es, .C)
-	emit_vertex(es, ct.pos(t, gate))
+
+	if len(es.em.symbols) > 1 {
+		gs_pos := ct.pos(t, ct.next(gate))
+		ge_pos := ct.pos(t, ct.prev(gate))
+		o_pos := ct.pos(t, ct.op(t, gate))
+
+		pred_input := Predictor_Input {
+			gs = gs_pos,
+			ge = ge_pos,
+			op = o_pos,
+		}
+		prediction := es.predictor.predict(pred_input)
+		correction := ct.pos(t, gate) - prediction
+
+		emit_vertex(es, correction)
+	} else { 	// initial triangle must emit absolute position
+		emit_vertex(es, ct.pos(t, gate))
+	}
 
 	mark(es, t, gate, .VISITED)
 
@@ -328,8 +345,8 @@ visit_hole :: proc(es: ^Encoder_State, t: ct.Corner_Table, gate: ct.Corner) -> i
 
 		n += 1
 		mark(es, t, next, .VISITED)
-		emit_vertex(es, t.pos[v]) // TODO: use predictor here OR inside
-		// emit_vertex
+		// TODO: there maybe might be used predictor? but I don't assume so
+		emit_vertex(es, t.pos[v])
 
 		current = next
 	}

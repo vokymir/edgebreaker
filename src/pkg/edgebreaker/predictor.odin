@@ -23,22 +23,13 @@ Predictor_Kind :: enum {
 	PARALLELOGRAM,
 }
 
-/*
-C operaion on any two triangles where gs/ge means gate start/end:
+Predictor_Input :: struct {
+	gs, ge: Vec3,
+	op:     Vec3,
+	// maybe another things if some predictor needs it
+}
 
-   gs--n
-  / \ /
- o--ge
-
-Inputs:
-- gs, ge: positions of current gate
-- o: position of the third vertex in already processed triangle (opposite to
-newly found v)
-
-Returns:
-- Vec3: the PREDICTED position of vertex v
-*/
-Predictor_Proc :: #type proc(gs, ge, o: Vec3) -> Vec3
+Predictor_Proc :: #type proc(input: Predictor_Input) -> Vec3
 
 Predictor :: struct {
 	kind:    Predictor_Kind,
@@ -51,13 +42,26 @@ Predictor :: struct {
 Always predict {0,0,0} therefore the correction/delta must be the absolute 
 vertex position.
 */
-predict_none :: proc(gs, ge, o: Vec3) -> Vec3 {
+predict_none :: proc(input: Predictor_Input) -> Vec3 {
 	return {0, 0, 0}
 }
 
 /*
-Standard Parallelogram, ie predict gs + ge - o.
+C operation on any two triangles where gs/ge means gate start/end:
+Standard Parallelogram, ie predict: v = gs + ge - o.
+
+   gs--v
+  / \ /
+ o--ge
+
+Inputs:
+- gs, ge: positions of current gate
+- op: position of the third vertex in already processed triangle (opposite to
+newly found v)
+
+Returns:
+- Vec3: the PREDICTED position of vertex v
 */
-predict_parallelogram :: proc(gs, ge, o: Vec3) -> Vec3 {
-	return gs + ge - o
+predict_parallelogram :: proc(input: Predictor_Input) -> Vec3 {
+	return input.gs + input.ge - input.op
 }
