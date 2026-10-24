@@ -7,10 +7,6 @@ import "core:slice"
 
 Vector3 :: [3]f32
 
-// TODO: write assert
-// Per component, assert that the number of topology entries equals 2 − χ
-// (or 1 − χ if the component has a boundary).
-
 /***************************** Structs ****************************************/
 
 Encoder_State :: struct {
@@ -154,6 +150,10 @@ compress_ct :: proc(es: ^Encoder_State, t: ct.Corner_Table) -> (ok := false, em:
 
 	for found {
 		log.debug("component found on", index)
+		// for asserting eulerity
+		sym0 := len(es.em.symbols)
+		vert0 := len(es.em.vertices)
+		topo0 := len(es.em.topology)
 
 		gate := ct.v2c(t, ct.Vertex(index))
 		if has_boundary {
@@ -163,6 +163,8 @@ compress_ct :: proc(es: ^Encoder_State, t: ct.Corner_Table) -> (ok := false, em:
 		}
 
 		compress_component(es, t, gate)
+
+		assert_component_euler(es^, sym0, vert0, topo0, has_boundary)
 
 		index, has_boundary, found = next_component(es^, t, index, has_boundary)
 	}
@@ -213,9 +215,6 @@ initial_triangle :: proc(es: ^Encoder_State, t: ct.Corner_Table, gate: ct.Corner
 	if ct.border_v(t, ct.c2v(t, gs)) { 	// on border
 		l := visit_hole(es, t, ge)
 
-		// TODO: this is only for now
-		// convention: send boundary len as the first topology entry, or with the
-		// invalid corner
 		emit_topology(es, ct.INVALID_CORNER, ct.INVALID_CORNER, l)
 
 	} else {
@@ -256,8 +255,6 @@ C :: proc(es: ^Encoder_State, t: ct.Corner_Table, gate: ct.Corner) -> ct.Corner 
 	return right
 }
 
-// convention: triangle gate is 0, next is 1, next-next(=prev) is 2
-// TODO: mention this convention somewhere
 S :: proc(es: ^Encoder_State, t: ct.Corner_Table, gate: ct.Corner, step: int) -> ct.Corner {
 
 	if is_marked(es^, t, gate, .HOLE) {
@@ -517,4 +514,80 @@ gate_from_corner :: proc(t: ct.Corner_Table, c: ct.Corner) -> (gate: ct.Corner) 
 	}
 
 	return gate
+}
+
+/*********************************** Asserts **********************************/
+
+
+// TODO: write assert
+// Per component, assert that the number of topology entries equals 2 − χ
+// (or 1 − χ if the component has a boundary).
+/*
+From the Euler equation for triangles mentined in Lewiner et al. paper in
+Theroem 2
+
+  chi(S) = |T(S)| - |E(S)| + |V(S)| = 2 - 2 g(S) - b(S)
+
+where
+  S ... oriented component
+  g ... genus
+  b ... # boundary curves
+
+when write simplisticaly
+
+  chi = T - E + V = 2 - 2g - b                                               (1)
+
+we get a few assertable observations:
+
+1) edges & triangles
+  every T has 3 E
+  E_B (boundary edge) belongs to 1 triangle
+  E_I (interal edge) belongs to 2 triangles
+  E = E_B + E_I in component
+
+  3T = 2E_I + E_B = 2E - E_B  =>  E = (3T + E_B) / 2                         (2)
+
+  boundary curve is closed loop => #V == #E
+  on mainfold: every boundary edge is on EXACTLY one loop
+
+  E_B = B   =>  (3T + B) / 2 = E; E % 2 == 0                                 (3)
+  
+2) we don't have E
+  but using (3) we can substitute in (1)
+
+  chi = T - (3T + B) / 2 + V                                                 (4)
+
+3) handles & holes
+  from paper, Proof of Theorem 5:
+
+  (V - chi + 1) - (V - 1) = 2 - chi = 2g + b                                 (5)
+
+  these are the edges that must be explicitely saved, ie #topology entries
+  it differs for
+  - closed component:     n = 2g         = 2 - chi  (no b needed as b=0)     (6)
+  - has boundary:         n = 2g + b - 1 = 1 - chi                           (6)
+
+*/
+@(disabled = !ODIN_DEBUG)
+assert_component_euler :: proc(es: Encoder_State, sym0, vert0, topo0: int, has_boundary: bool) {
+	T := len(es.em.symbols) - sym0
+	V := len(es.em.vertices) - vert0
+	topo := es.em.topology[topo0:]
+
+	// count all boundary vertices - from initial border and all holes
+	B := 0
+	for e in topo {B += e.hole_len}
+
+	assert((3 * T + B) % 2 == 0, "3T + B must be even") // (2)
+	E := (3 * T + B) / 2 // (2)
+	chi := T - E + V // (1) and (4)
+
+	// due to my TEMPORAL handling of initial boundary as topology entry which is
+	// not calculated with in the equations, if such entry was counted it must be
+	// subtracted
+	n_entries := len(topo) // (6)
+	if has_boundary {n_entries -= 1}
+
+	expected := has_boundary ? 1 - chi : 2 - chi // (6)
+	assert(n_entries == expected, "topology entries don't match Euler characteristic")
 }
