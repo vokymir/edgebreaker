@@ -66,6 +66,10 @@ main :: proc() {
 		for v in em.vertices {
 			fmt.println(v[0], v[1], v[2])
 		}
+		fmt.println()
+		for t in em.topology {
+			fmt.println(t.s_corner, t.arrival_corner, t.hole_len)
+		}
 	// encode
 	case ".ebk":
 	//decode
