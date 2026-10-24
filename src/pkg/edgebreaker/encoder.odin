@@ -156,7 +156,7 @@ compress_ct :: proc(es: ^Encoder_State, t: ct.Corner_Table) -> (ok := false, em:
 			//   /  \     OR this may happen:  /  \     in the gate_from_corner()
 			// gs -- ge                      ge -- gs   case
 			// as in gate start & gate end
-			gs, _ := ct.boundary_corner_of_vertex(t, ct.Vertex(index))
+			gs, _ := ct.rightmost_boundary_corner_of_vertex(t, ct.Vertex(index))
 			gate = gate_from_corner(t, gs)
 		}
 
@@ -207,18 +207,16 @@ C :: proc(es: ^Encoder_State, t: ct.Corner_Table, gate: ct.Corner) -> ct.Corner 
 	return right
 }
 
-// TODO: impl
-// should it gets step or calculate by itself?
+// convention: triangle gate is 0, next is 1, next-next(=prev) is 2
+// TODO: mention this convention somewhere
 S :: proc(es: ^Encoder_State, t: ct.Corner_Table, gate: ct.Corner, step: int) -> ct.Corner {
 
 	if is_marked(es^, t, gate, .HOLE) {
 
-		// find all hole vertices & mark with VISITED
-		// store es.hole_len_of_s[step] = ...
-		holes_count := 0 // TMP
+		holes_count := visit_hole(es, t, gate)
+		if holes_count <= 0 {log.panic("Hole is too short.")}
+
 		es.hole_len_of_s[step] = holes_count
-		// convention: triangle gate is 0, next is 1, next-next(=prev) is 2
-		// TODO: mention this convention somewhere
 	}
 
 	return ct.INVALID_CORNER
@@ -281,6 +279,37 @@ mark_all_holes :: proc(es: ^Encoder_State, t: ct.Corner_Table) {
 			mark(es, t, c, .HOLE)
 		}
 	}
+}
+
+/*
+Mark all vertices in the hole as visited and return number of those vertices =
+length of hole (excluding gate).
+*/
+@(private = "file")
+visit_hole :: proc(es: ^Encoder_State, t: ct.Corner_Table, gate: ct.Corner) -> int {
+	if !is_marked(es^, t, gate, .HOLE) || !ct.c_on_boundary(t, gate) {return 0}
+
+	initial := ct.vertex_of_corner(t, gate)
+	current := gate
+	n := 0
+
+	for {
+		next, found := ct.next_boundary_corner(t, current)
+		if !found {
+			log.panic("Cannot find next boundary corner in hole.")
+		}
+
+		v := ct.vertex_of_corner(t, next)
+		if v == initial {return n}
+
+		mark(es, t, next, .VISITED)
+		emit_vertex(es, t.geometry[v]) // TODO: use predictor here OR inside
+		// emit_vertex
+
+		current = next
+	}
+
+	return n
 }
 
 /******************************* Clarity helpers ******************************/

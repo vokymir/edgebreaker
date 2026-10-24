@@ -179,23 +179,23 @@ all holes.
 vertex_is_on_boundary :: proc(ct: Corner_Table, v: Vertex) -> bool {
 	// the same logic with only small additional allocation, is not worth logic
 	// duplication
-	_, found := boundary_corner_of_vertex(ct, v)
+	_, found := rightmost_boundary_corner_of_vertex(ct, v)
 	return found
 }
 
 // TODO: update to not need vertex at all...
 c_on_boundary :: proc(ct: Corner_Table, c: Corner) -> bool {
-	_, found := boundary_corner_of_vertex(ct, vertex_of_corner(ct, c))
+	_, found := rightmost_boundary_corner_of_vertex(ct, vertex_of_corner(ct, c))
 	return found
 }
 
 /*
 Returns:
-- c: corner for which the left_corner() returns INVALID_CORNER, ie left-most
+- c: corner for which the right_corner() returns INVALID_CORNER, ie right-most
 corner (counter-clockwise)
 - found: if not on boundary, return false
 */
-boundary_corner_of_vertex :: proc(
+rightmost_boundary_corner_of_vertex :: proc(
 	ct: Corner_Table,
 	v: Vertex,
 ) -> (
@@ -209,7 +209,7 @@ boundary_corner_of_vertex :: proc(
 
 	// start traversal of corners to the left
 	for {
-		next = left_corner(ct, current)
+		next = right_corner(ct, current)
 		if next == initial {
 			return // full-circle => not boundary
 		}
@@ -222,42 +222,33 @@ boundary_corner_of_vertex :: proc(
 
 
 /*
-WARN: does not work for mesh with holes 
+
+ ~ nothing ~
+ D -- C -- F
+  \  / \  /  =>   search direction
+   A -- B 
+    \  /
+     E
 
 Inputs:
 - ct: corner table
-- c: corner which is in boundary triangle, opposite to boundary edge
+- c: any corner of vertex C
 
 Returns:
-- c_next: next boundary edge, ie corner opposite to that edge in the same
-triangle
+- cb: next vertex (CCW), its corner (CB on the schema)
 - found: bool
 */
 next_boundary_corner :: proc(
 	ct: Corner_Table,
 	c: Corner,
 ) -> (
-	c_next := INVALID_CORNER,
+	cb := INVALID_CORNER,
 	found := false,
 ) {
 	if c == INVALID_CORNER {return}
-	initial := prev_corner(c)
-	current := initial
-	next := current
+	bf := rightmost_boundary_corner_of_vertex(ct, vertex_of_corner(ct, c)) or_return
 
-	// start traversal of corners to the left
-	for {
-		next = left_corner(ct, current)
-		if next == initial {
-			return // v is not a boundary vertex
-		}
-		if next == INVALID_CORNER {
-			break // found & stored in current
-		}
-		current = next
-	}
-
-	c_next = prev_corner(current)
+	cb = prev_corner(bf)
 	found = true
 	return
 }
