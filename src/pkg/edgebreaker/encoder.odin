@@ -157,12 +157,9 @@ compress_ct :: proc(es: ^Encoder_State, t: ct.Corner_Table) -> (ok := false, em:
 
 		gate := ct.v2c(t, ct.Vertex(index))
 		if has_boundary {
-			//     v                             v      which is handled
-			//   /  \     OR this may happen:  /  \     in the gate_from_corner()
-			// gs -- ge                      ge -- gs   case
-			// as in gate start & gate end
-			gs, _ := ct.v2c_right_border(t, ct.Vertex(index))
-			gate = gate_from_corner(t, gs)
+			// here 'gate' is absolutely not a gate, but either gs or ge!
+			ge, _ := ct.v2c_right_border(t, ct.Vertex(index))
+			gate = gate_from_corner(t, ge)
 		}
 
 		compress_component(es, t, gate)
@@ -483,20 +480,41 @@ next_component :: proc(
 }
 
 /*
-From a corner which might be on boundary return the corresponding gate vertex.
+From a corner which should be on border return the corresponding gate corner.
+
+ truth:         case 1    case 2    case 3
+                                          
+    v              ?         c         ?
+  /  \           /  \      /  \      /  \
+ gs--ge         ? -- c    ? -- ?    c -- ?
+~border~
+
+case2 SHOULDN'T HAPPEN
 */
 @(private = "file")
 gate_from_corner :: proc(t: ct.Corner_Table, c: ct.Corner) -> (gate: ct.Corner) {
-	gs := c // take any corner as gate_start from the triangle
+	ge := c // assume case1
+	gs := ct.prev(ge)
+	v := ct.next(ge)
 
-	ge := ct.next(gs)
+	gs_on_border := ct.border_v(t, ct.c2v(t, gs))
+	ge_on_border := ct.border_v(t, ct.c2v(t, ge))
+	v_on_border := ct.border_v(t, ct.c2v(t, v))
 
-	// if ge is in fact gate, move gs
-	if !ct.border_v(t, ct.c2v(t, ge)) {
-		gs = ct.prev(gs)
+	switch {
+	// case 1
+	case gs_on_border && ge_on_border:
+		gate = v
+	// case 2
+	case gs_on_border && v_on_border:
+		gate = ge
+	// case 3
+	case ge_on_border && v_on_border:
+		gate = gs
+	// corner was not in border triangle
+	case:
+		return ct.INVALID_CORNER
 	}
-	// else is gs correct & no need to do anything
 
-	gate = ct.prev(gs)
 	return gate
 }
