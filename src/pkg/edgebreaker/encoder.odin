@@ -235,6 +235,8 @@ S :: proc(es: ^Encoder_State, t: ct.Corner_Table, gate: ct.Corner, step: int) ->
 	emit_symbol(es, .S)
 	push_gate(es, left)
 
+	mark(es, t, gate, .VISITED)
+
 	return right
 }
 
@@ -308,6 +310,8 @@ length of hole (excluding gate).
 @(private = "file")
 visit_hole :: proc(es: ^Encoder_State, t: ct.Corner_Table, gate: ct.Corner) -> int {
 	if !is_marked(es^, t, gate, .HOLE) || !ct.border_c(t, gate) {return 0}
+
+	mark(es, t, gate, .VISITED)
 
 	initial := ct.c2v(t, gate)
 	current := gate
