@@ -47,6 +47,8 @@ init_es :: proc(
 
 	es.gate_stack = make([dynamic]ct.Corner, allocator, loc)
 
+	es.hole_len_of_s = make(map[int]int, allocator, loc)
+
 	es.predictor = predictor
 	es.allocator = allocator
 }
@@ -58,6 +60,7 @@ destroy_es :: proc(es: ^Encoder_State, loc := #caller_location) {
 	delete(es.vertex_marks, es.allocator, loc)
 	delete(es.tri_step, es.allocator, loc)
 	delete(es.gate_stack, loc)
+	delete(es.hole_len_of_s, loc)
 }
 
 /*
@@ -342,18 +345,22 @@ mark_all_holes :: proc(es: ^Encoder_State, t: ct.Corner_Table) {
 
 /*
 Mark all vertices in the hole as visited and return number of those vertices =
-length of hole (excluding gate).
+length of hole.
 */
 @(private = "file")
 visit_hole :: proc(es: ^Encoder_State, t: ct.Corner_Table, gate: ct.Corner) -> int {
-	if !is_marked(es^, t, gate, .HOLE) || !ct.border_v(t, ct.c2v(t, gate)) {return 0}
+	log.debug(is_marked(es^, t, gate, .HOLE), ct.border_v(t, ct.c2v(t, gate)))
+
+	// !is_marked(es^, t, gate, .HOLE) ||  // it was making trouble in
+	// initial_triangle()
+	if !ct.border_v(t, ct.c2v(t, gate)) {return 0}
 	log.debug("gate:", gate)
 
 	mark(es, t, gate, .VISITED)
 
 	initial := ct.c2v(t, gate)
 	current := gate
-	n := 0
+	n := 1 // initialized with 1st vertex
 
 	for {
 		next, found := ct.next_on_border(t, current)

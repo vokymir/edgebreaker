@@ -52,7 +52,7 @@ main :: proc() {
 		defer os.close(f)
 
 		es: eb.Encoder_State
-		eb.init_es(&es, len(table.pos), len(table.tris))
+		eb.init_es(&es, len(table.pos), len(table.tris)) //, predictor = eb.Predictor_Parallelogram)
 
 		fmt.println("compressing")
 		ok, em := eb.compress(&es, table)
@@ -63,8 +63,9 @@ main :: proc() {
 			fmt.print(s)
 		}
 		fmt.println()
+		fmt.println()
 		for v in em.vertices {
-			fmt.println(v[0], v[1], v[2])
+			fmt.println("v", v[0], v[1], v[2])
 		}
 		fmt.println()
 		for t in em.topology {
