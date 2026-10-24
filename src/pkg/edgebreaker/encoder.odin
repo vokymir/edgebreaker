@@ -43,13 +43,13 @@ Side :: enum u8 {
 	LEFT  = 2,
 }
 
-
 /***************************** Structs ****************************************/
 
 /*
 Stores the state of edgebreaker algorithm during compression.
 Is only used with corner table.
 */
+@(private) // only used in the package
 Encoder_State :: struct {
 	// for destroy
 	allocator:          runtime.Allocator,
@@ -114,6 +114,7 @@ Component_Info :: struct {
 /*
 Initialize Encoder State for Edgebreaker compression with Corner Table.
 */
+@(private) // only used in the package
 init_es :: proc(
 	es: ^Encoder_State,
 	n_vertices, n_triangles: int,
@@ -138,6 +139,7 @@ init_es :: proc(
 Destroy internals of Encoder State.
 WARN: caller must deallocate predictor (if necessary)
 */
+@(private) // only used in the package
 destroy_es :: proc(es: ^Encoder_State, loc := #caller_location) {
 	delete(es.vertex_marks, es.allocator, loc)
 	delete(es.tri_step, es.allocator, loc)

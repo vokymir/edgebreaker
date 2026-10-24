@@ -6,6 +6,19 @@ Vec3 :: corner_table.Vec3
 
 /********************************* POSSIBLE PREDICTORS ************************/
 
+/*
+Given Predictor Kind create a predictor.
+*/
+predictor_of :: proc(k: Predictor_Kind) -> Predictor {
+	switch k {
+	case .NONE:
+		return Predictor_None
+	case .PARALLELOGRAM:
+		return Predictor_Parallelogram
+	}
+	return Predictor_None
+}
+
 Predictor_None :: Predictor {
 	kind    = .NONE,
 	predict = predict_none,

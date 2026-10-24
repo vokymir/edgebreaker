@@ -5,6 +5,34 @@ import "base:runtime"
 import "core:log"
 
 /***************************** Structs ****************************************/
+/*
+It is not needed to add anything to ES, but in the future smth from it might
+move to ES_CT and therefore better be prepared.
+*/
+
+@(private = "file")
+Encoder_State_CT :: struct {
+	using base: Encoder_State,
+	// corner-table extra fields (if any)
+}
+
+@(private = "file")
+init_es_ct :: proc(
+	es: ^Encoder_State_CT,
+	t: ct.Corner_Table,
+	predictor: Predictor,
+	allocator := context.allocator,
+	loc := #caller_location,
+) {
+	init_es(es, len(t.pos), len(t.tris) / 3, predictor, allocator, loc)
+	// corner-table extra allocations
+}
+
+@(private = "file")
+destroy_es_ct :: proc(es: ^Encoder_State, loc := #caller_location) {
+	// corner-table extra deallocation
+	destroy_es(es, loc)
+}
 
 /***************************** Compression ************************************/
 
@@ -16,15 +44,25 @@ The encoder_state struct must be initialized before.
 The caller is responsible for freeing returned em.
 */
 @(private, require_results)
-compress_ct :: proc(es: ^Encoder_State, t: ct.Corner_Table) -> (ok := false, em: ^Encoded_Mesh) {
+compress_ct :: proc(
+	t: ct.Corner_Table,
+	predictor := Predictor_None,
+	allocator := context.allocator,
+	loc := #caller_location,
+) -> (
+	ok := false,
+	em: ^Encoded_Mesh,
+) {
 	log.debug(t.pos)
+	es: Encoder_State_CT
+	init_es_ct(&es, t, predictor, allocator, loc)
 
 	em = new(Encoded_Mesh)
-	init_em(em, len(t.tris) / 3, len(t.pos), es)
+	init_em(em, len(t.tris) / 3, len(t.pos), &es)
 
-	mark_all_holes(es, t)
+	mark_all_holes(&es, t)
 
-	index, has_boundary, found := next_component(es^, t)
+	index, has_boundary, found := next_component(es, t)
 
 	for found {
 		log.debug("component found on", index)
@@ -40,11 +78,11 @@ compress_ct :: proc(es: ^Encoder_State, t: ct.Corner_Table) -> (ok := false, em:
 			gate = gate_from_corner(t, ge)
 		}
 
-		compress_component(es, t, gate)
+		compress_component(&es, t, gate)
 
-		assert_component_euler(es^, sym0, vert0, topo0, has_boundary)
+		assert_component_euler(es, sym0, vert0, topo0, has_boundary)
 
-		index, has_boundary, found = next_component(es^, t, index, has_boundary)
+		index, has_boundary, found = next_component(es, t, index, has_boundary)
 	}
 
 	assert(len(em.symbols) == len(t.tris) / 3, "not one symbol per triangle")
@@ -55,7 +93,7 @@ compress_ct :: proc(es: ^Encoder_State, t: ct.Corner_Table) -> (ok := false, em:
 Compress one component in mesh.
 */
 @(private = "file")
-compress_component :: proc(es: ^Encoder_State, t: ct.Corner_Table, gate: ct.Corner) {
+compress_component :: proc(es: ^Encoder_State_CT, t: ct.Corner_Table, gate: ct.Corner) {
 	gate := gate
 
 	initial_triangle(es, t, gate) // handle boundary vertices or just 3 vertices
@@ -98,7 +136,7 @@ Handle the first triangle:
 set es.first_in_component to true
 */
 @(private = "file") // becuase name might be reused in decoding
-initial_triangle :: proc(es: ^Encoder_State, t: ct.Corner_Table, gate: ct.Corner) {
+initial_triangle :: proc(es: ^Encoder_State_CT, t: ct.Corner_Table, gate: ct.Corner) {
 	gs := ct.next(gate)
 	ge := ct.prev(gate)
 
@@ -122,7 +160,7 @@ Handle C operation, the main reason for decomposition is calculation of
 prediction and correction.
 */
 @(private = "file") // becuase name might be reused in decoding
-C :: proc(es: ^Encoder_State, t: ct.Corner_Table, gate: ct.Corner) -> ct.Corner {
+C :: proc(es: ^Encoder_State_CT, t: ct.Corner_Table, gate: ct.Corner) -> ct.Corner {
 	emit_symbol(es, .C)
 
 	if !es.first_in_component {
@@ -156,7 +194,7 @@ Handle S operation, S might be encountering hole or not, but this will work.
 Pushes left gate to gate_stack and returns right gate.
 */
 @(private = "file") // becuase name might be reused in decoding
-S :: proc(es: ^Encoder_State, t: ct.Corner_Table, gate: ct.Corner, step: int) -> ct.Corner {
+S :: proc(es: ^Encoder_State_CT, t: ct.Corner_Table, gate: ct.Corner, step: int) -> ct.Corner {
 
 	if is_marked(es^, t, gate, .HOLE) {
 
@@ -182,7 +220,7 @@ Checks if next triangle will be already encountered S. If so, emits its topology
 and therefore saves the information about hole or handle.
 */
 @(private = "file") // becuase name might be reused in decoding
-check_handles :: proc(es: ^Encoder_State, t: ct.Corner_Table, gate: ct.Corner, step: int) {
+check_handles :: proc(es: ^Encoder_State_CT, t: ct.Corner_Table, gate: ct.Corner, step: int) {
 	// the two non-gate edges
 	sides := [2]struct {
 		edge_corner: ct.Corner,
@@ -211,7 +249,7 @@ check_handles :: proc(es: ^Encoder_State, t: ct.Corner_Table, gate: ct.Corner, s
 Pushes gate to es.gate_stack.
 */
 @(private = "file")
-push_gate :: #force_inline proc(es: ^Encoder_State, gate: ct.Corner) {
+push_gate :: #force_inline proc(es: ^Encoder_State_CT, gate: ct.Corner) {
 	append(&es.gate_stack, Gate(gate))
 }
 
@@ -219,7 +257,7 @@ push_gate :: #force_inline proc(es: ^Encoder_State, gate: ct.Corner) {
 Pop gate stack until unvisited gate is found.
 */
 @(private = "file")
-pop_unvisited :: #force_inline proc(es: ^Encoder_State) -> ct.Corner {
+pop_unvisited :: #force_inline proc(es: ^Encoder_State_CT) -> ct.Corner {
 	for {
 		if len(es.gate_stack) == 0 {return ct.INVALID_CORNER}
 
@@ -240,7 +278,7 @@ Mark all holes in the whole mesh, in all components, as .HOLE.
 Complexity: theta(n)
 */
 @(private = "file")
-mark_all_holes :: proc(es: ^Encoder_State, t: ct.Corner_Table) {
+mark_all_holes :: proc(es: ^Encoder_State_CT, t: ct.Corner_Table) {
 
 	for c in t.v2c {
 
@@ -257,7 +295,7 @@ length of hole.
 Starting from gate-vertex all vertices are marked & emitted.
 */
 @(private = "file")
-visit_hole :: proc(es: ^Encoder_State, t: ct.Corner_Table, gate: ct.Corner) -> int {
+visit_hole :: proc(es: ^Encoder_State_CT, t: ct.Corner_Table, gate: ct.Corner) -> int {
 	log.debug(is_marked(es^, t, gate, .HOLE), ct.border_v(t, ct.c2v(t, gate)))
 
 	if !ct.border_v(t, ct.c2v(t, gate)) {return 0}
@@ -291,10 +329,11 @@ visit_hole :: proc(es: ^Encoder_State, t: ct.Corner_Table, gate: ct.Corner) -> i
 
 /******************************* Clarity helpers ******************************/
 // all are private to file because they are very small
+// NOTE: might be shared across encoders eventually
 
 @(private = "file")
 mark :: #force_inline proc(
-	es: ^Encoder_State,
+	es: ^Encoder_State_CT,
 	t: ct.Corner_Table,
 	c: ct.Corner,
 	mark: Mark,
@@ -306,7 +345,7 @@ mark :: #force_inline proc(
 
 @(private = "file")
 is_marked :: #force_inline proc(
-	es: Encoder_State,
+	es: Encoder_State_CT,
 	t: ct.Corner_Table,
 	c: ct.Corner,
 	mark: Mark,
@@ -316,7 +355,7 @@ is_marked :: #force_inline proc(
 
 @(private = "file")
 tri_step :: #force_inline proc(
-	es: ^Encoder_State,
+	es: ^Encoder_State_CT,
 	gate: ct.Corner,
 	step: int,
 	loc := #caller_location,
@@ -326,12 +365,16 @@ tri_step :: #force_inline proc(
 }
 
 @(private = "file")
-tri_step_eq :: #force_inline proc(es: Encoder_State, c: ct.Corner, step: int) -> bool {
+tri_step_eq :: #force_inline proc(es: Encoder_State_CT, c: ct.Corner, step: int) -> bool {
 	return es.tri_step[ct.c2t(c)] == step
 }
 
 @(private = "file")
-emit_symbol :: #force_inline proc(es: ^Encoder_State, symbol: Operation, loc := #caller_location) {
+emit_symbol :: #force_inline proc(
+	es: ^Encoder_State_CT,
+	symbol: Operation,
+	loc := #caller_location,
+) {
 	append(&es.em.symbols, symbol)
 	log.debug("emitted symbol", symbol, location = loc)
 	log.debug(es.vertex_marks, location = loc)
@@ -339,7 +382,7 @@ emit_symbol :: #force_inline proc(es: ^Encoder_State, symbol: Operation, loc := 
 
 @(private = "file")
 emit_vertex :: #force_inline proc(
-	es: ^Encoder_State,
+	es: ^Encoder_State_CT,
 	pos_or_correction: Vector3,
 	loc := #caller_location,
 ) {
@@ -349,7 +392,7 @@ emit_vertex :: #force_inline proc(
 
 @(private = "file")
 emit_topology :: #force_inline proc(
-	es: ^Encoder_State,
+	es: ^Encoder_State_CT,
 	s_step: int,
 	arr_step: int,
 	arr_side: Side,
@@ -362,7 +405,7 @@ emit_topology :: #force_inline proc(
 
 @(private = "file")
 emit_component :: #force_inline proc(
-	es: ^Encoder_State,
+	es: ^Encoder_State_CT,
 	outer_boundary: int,
 	loc := #caller_location,
 ) {
@@ -388,7 +431,7 @@ Returns:
 */
 @(private = "file")
 next_component :: proc(
-	es: Encoder_State,
+	es: Encoder_State_CT,
 	t: ct.Corner_Table,
 	start := 0,
 	search_first_holes := true,
@@ -464,6 +507,7 @@ gate_from_corner :: proc(t: ct.Corner_Table, c: ct.Corner) -> (gate: ct.Corner) 
 }
 
 /*********************************** Asserts **********************************/
+// might be used across encoders eventually
 
 /*
 From the Euler equation for triangles mentined in Lewiner et al. paper in
@@ -515,7 +559,7 @@ This procedure asserts multiple equations from this, namely (2) and (6) to test
 the validity of the solution.
 */
 @(private = "file", disabled = ODIN_DISABLE_ASSERT)
-assert_component_euler :: proc(es: Encoder_State, sym0, vert0, topo0: int, has_boundary: bool) {
+assert_component_euler :: proc(es: Encoder_State_CT, sym0, vert0, topo0: int, has_boundary: bool) {
 	T := len(es.em.symbols) - sym0
 	V := len(es.em.vertices) - vert0
 	topo := es.em.topology[topo0:]
