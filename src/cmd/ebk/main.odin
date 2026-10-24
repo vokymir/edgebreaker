@@ -57,21 +57,26 @@ main :: proc() {
 		fmt.println("compressing")
 		ok, em := eb.compress(&es, table)
 		eb.destroy_es(&es)
-		defer free(&em) // TODO: is the order of freeing correct?
+		defer free(em)
 		defer eb.destroy_em(em)
 		fmt.println("done")
 
+		fmt.println("== SYMBOLS ==")
 		for s in em.symbols {
 			fmt.print(s)
 		}
 		fmt.println()
-		fmt.println()
+		fmt.println("== VERTICES ==")
 		for v in em.vertices {
 			fmt.println("v", v[0], v[1], v[2])
 		}
-		fmt.println()
+		fmt.println("== TOPOLOGY ==")
 		for t in em.topology {
-			fmt.println(t.s_corner, t.arrival_corner, t.hole_len)
+			fmt.println(t.s_step, t.arrival_step, t.arrival_side, t.hole_len)
+		}
+		fmt.println("== COMPONENTS ==")
+		for c in em.components {
+			fmt.println(c.outer_boundary)
 		}
 	// encode
 	case ".ebk":

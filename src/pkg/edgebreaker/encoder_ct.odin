@@ -69,61 +69,14 @@ destroy_es :: proc(es: ^Encoder_State, loc := #caller_location) {
 }
 
 /*
-Topology entry is necessary for every hole or handle.
-It stores two gate corners & hole len.
+Marks vertices as the algorithm goes through the mesh.
 */
-Topology_Entry :: struct {
-	// at which corner was the symbol S emitted
-	s_corner:       ct.Corner,
-	// at which corner the next triangle would be again the same S triangle if not
-	// handled via this entry
-	arrival_corner: ct.Corner,
-	// if is not hole, hole_len == 0
-	hole_len:       int,
+@(private = "file")
+Mark :: enum {
+	NOT_VISITED,
+	VISITED,
+	HOLE,
 }
-
-/*
-Store the encoded mesh as a sequence of consecutive CLERS symbols, a list of all
-vertices in the order of appeareance and a list of topology entries.
-
-TODO: maybe it will need to store some additional metada, eg. predictor
-*/
-Encoded_Mesh :: struct {
-	symbols:  [dynamic]Operation,
-	vertices: [dynamic]Vector3,
-	topology: [dynamic]Topology_Entry,
-}
-
-/*
-Initialize Encoded Mesh. If used with Encoder State (assumed usage) it can
-self-attach to it (= set es.em).
-*/
-init_em :: proc(
-	em: ^Encoded_Mesh,
-	n_symbols: int = 0,
-	n_vertices: int = 0,
-	es: ^Encoder_State = nil,
-	allocator := context.allocator,
-	loc := #caller_location,
-) {
-	em.symbols = make([dynamic]Operation, 0, n_symbols, allocator, loc)
-	em.vertices = make([dynamic]Vector3, 0, n_vertices, allocator, loc)
-	em.topology = make([dynamic]Topology_Entry, 0, 0, allocator, loc)
-
-	if es != nil {
-		es.em = em
-	}
-}
-
-/*
-Destroy the internals of Encoded Mesh.
-*/
-destroy_em :: proc(em: ^Encoded_Mesh, loc := #caller_location) {
-	delete(em.symbols, loc)
-	delete(em.vertices, loc)
-	delete(em.topology, loc)
-}
-
 
 /***************************** Compression ************************************/
 
@@ -221,10 +174,9 @@ initial_triangle :: proc(es: ^Encoder_State, t: ct.Corner_Table, gate: ct.Corner
 	gs := ct.next(gate)
 	ge := ct.prev(gate)
 
+	hole_len := 0
 	if ct.border_v(t, ct.c2v(t, gs)) { 	// on border
-		l := visit_hole(es, t, ge)
-
-		emit_topology(es, ct.INVALID_CORNER, ct.INVALID_CORNER, l)
+		hole_len = visit_hole(es, t, ge)
 
 	} else {
 		mark(es, t, gs, .VISITED)
@@ -232,6 +184,7 @@ initial_triangle :: proc(es: ^Encoder_State, t: ct.Corner_Table, gate: ct.Corner
 		emit_vertex(es, ct.pos(t, gs))
 		emit_vertex(es, ct.pos(t, ge))
 	}
+	emit_component(es, hole_len)
 
 	es.first_in_component = true
 }
@@ -302,12 +255,11 @@ and therefore saves the information about hole or handle.
 */
 @(private = "file") // becuase name might be reused in decoding
 check_handles :: proc(es: ^Encoder_State, t: ct.Corner_Table, gate: ct.Corner, step: int) {
-	// the two non-gate edges: (corner next(gate), k=1) is the right edge,
-	// (corner prev(gate), k=2) is the left edge
+	// the two non-gate edges
 	sides := [2]struct {
 		edge_corner: ct.Corner,
-		k:           ct.Corner,
-	}{{ct.next(gate), 1}, {ct.prev(gate), 2}}
+		side:        Side,
+	}{{ct.next(gate), .RIGHT}, {ct.prev(gate), .LEFT}}
 
 	for s in sides {
 		n := ct.op(t, s.edge_corner)
@@ -318,11 +270,11 @@ check_handles :: proc(es: ^Encoder_State, t: ct.Corner_Table, gate: ct.Corner, s
 		if es.em.symbols[n_step - 1] != .S {continue}
 
 		// reached an S triangle from the side: this can only be its left edge
-		s_c := ct.Corner(3 * (n_step - 1) + 2)
-		arrival := ct.Corner(3 * step + int(s.k))
+		s_c := 3 * (n_step - 1)
+		arrival := 3 * step
 		hole_len := es.hole_len_of_s[n_step - 1] // 0 if absent
 
-		emit_topology(es, s_c, arrival, hole_len)
+		emit_topology(es, s_c, arrival, s.side, hole_len)
 	}
 
 }
@@ -468,8 +420,26 @@ emit_vertex :: #force_inline proc(
 }
 
 @(private = "file")
-emit_topology :: #force_inline proc(es: ^Encoder_State, s, arr: ct.Corner, l: int) {
-	append(&es.em.topology, Topology_Entry{s_corner = s, arrival_corner = arr, hole_len = l})
+emit_topology :: #force_inline proc(
+	es: ^Encoder_State,
+	s_step: int,
+	arr_step: int,
+	arr_side: Side,
+	hole_len: int,
+	loc := #caller_location,
+) {
+	append(&es.em.topology, Topology_Entry{s_step, arr_step, arr_side, hole_len})
+	log.debug("topology emitted", es.em.topology[len(es.em.topology) - 1], location = loc)
+}
+
+@(private = "file")
+emit_component :: #force_inline proc(
+	es: ^Encoder_State,
+	outer_boundary: int,
+	loc := #caller_location,
+) {
+	append(&es.em.components, Component_Info{outer_boundary})
+	log.debug("component emitted", es.em.components[len(es.em.components) - 1], location = loc)
 }
 
 /****************************** Traversal helpers *****************************/
@@ -621,20 +591,17 @@ assert_component_euler :: proc(es: Encoder_State, sym0, vert0, topo0: int, has_b
 	T := len(es.em.symbols) - sym0
 	V := len(es.em.vertices) - vert0
 	topo := es.em.topology[topo0:]
+	comp := es.em.components[len(es.em.components) - 1]
 
 	// count all boundary vertices - from initial border and all holes
-	B := 0
+	B := comp.outer_boundary
 	for e in topo {B += e.hole_len}
 
 	assert((3 * T + B) % 2 == 0, "3T + B must be even") // (2)
 	E := (3 * T + B) / 2 // (2)
 	chi := T - E + V // (1) and (4)
 
-	// due to my TEMPORAL handling of initial boundary as topology entry which is
-	// not calculated with in the equations, if such entry was counted it must be
-	// subtracted
 	n_entries := len(topo) // (6)
-	if has_boundary {n_entries -= 1}
 
 	expected := has_boundary ? 1 - chi : 2 - chi // (6)
 	assert(n_entries == expected, "topology entries don't match Euler characteristic")
