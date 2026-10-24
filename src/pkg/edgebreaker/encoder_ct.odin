@@ -56,6 +56,7 @@ compress_ct :: proc(
 	log.debug(t.pos)
 	es: Encoder_State_CT
 	init_es_ct(&es, t, predictor, allocator, loc)
+	defer destroy_es_ct(&es, loc)
 
 	em = new(Encoded_Mesh)
 	init_em(em, len(t.tris) / 3, len(t.pos), &es)
