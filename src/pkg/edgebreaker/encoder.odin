@@ -177,6 +177,8 @@ compress_ct :: proc(es: ^Encoder_State, t: ct.Corner_Table) -> (ok := false, em:
 compress_component :: proc(es: ^Encoder_State, t: ct.Corner_Table, gate: ct.Corner) {
 	gate := gate
 
+	initial_triangle(es, t, gate)
+
 	for gate != ct.INVALID_CORNER { 	// for all triangles in 1 component
 		log.debug("gate is on corner", gate)
 
@@ -205,6 +207,27 @@ compress_component :: proc(es: ^Encoder_State, t: ct.Corner_Table, gate: ct.Corn
 			gate = S(es, t, gate, step)
 		}
 	} // while the current vertex is in any not visited triangle
+}
+
+initial_triangle :: proc(es: ^Encoder_State, t: ct.Corner_Table, gate: ct.Corner) {
+	gs := ct.next(gate)
+	ge := ct.prev(gate)
+
+	if ct.border_v(t, ct.c2v(t, gs)) { 	// on border
+		emit_vertex(es, ct.pos(t, ge))
+		l := visit_hole(es, t, ge)
+
+		// TODO: this is only for now
+		// convention: send boundary len as the first topology entry, or with the
+		// invalid corner
+		emit_topology(es, ct.INVALID_CORNER, ct.INVALID_CORNER, l)
+
+	} else {
+		mark(es, t, gs, .VISITED)
+		mark(es, t, ge, .VISITED)
+		emit_vertex(es, ct.pos(t, gs))
+		emit_vertex(es, ct.pos(t, ge))
+	}
 }
 
 C :: proc(es: ^Encoder_State, t: ct.Corner_Table, gate: ct.Corner) -> ct.Corner {
@@ -274,14 +297,11 @@ check_handles :: proc(es: ^Encoder_State, t: ct.Corner_Table, gate: ct.Corner, s
 		if es.em.symbols[n_step - 1] != .S {continue}
 
 		// reached an S triangle from the side: this can only be its left edge
-		append(
-			&es.em.topology,
-			Topology_Entry {
-				s_corner       = ct.Corner(3 * (n_step - 1) + 2),
-				arrival_corner = ct.Corner(3 * step + int(s.k)),
-				hole_len       = es.hole_len_of_s[n_step - 1], // 0 if absent
-			},
-		)
+		s_c := ct.Corner(3 * (n_step - 1) + 2)
+		arrival := ct.Corner(3 * step + int(s.k))
+		hole_len := es.hole_len_of_s[n_step - 1] // 0 if absent
+
+		emit_topology(es, s_c, arrival, hole_len)
 	}
 
 }
@@ -326,7 +346,8 @@ length of hole (excluding gate).
 */
 @(private = "file")
 visit_hole :: proc(es: ^Encoder_State, t: ct.Corner_Table, gate: ct.Corner) -> int {
-	if !is_marked(es^, t, gate, .HOLE) || !ct.border_c(t, gate) {return 0}
+	if !is_marked(es^, t, gate, .HOLE) || !ct.border_v(t, ct.c2v(t, gate)) {return 0}
+	log.debug("gate:", gate)
 
 	mark(es, t, gate, .VISITED)
 
@@ -356,33 +377,57 @@ visit_hole :: proc(es: ^Encoder_State, t: ct.Corner_Table, gate: ct.Corner) -> i
 
 /******************************* Clarity helpers ******************************/
 
-mark :: proc(es: ^Encoder_State, t: ct.Corner_Table, c: ct.Corner, mark: Mark) {
+mark :: #force_inline proc(
+	es: ^Encoder_State,
+	t: ct.Corner_Table,
+	c: ct.Corner,
+	mark: Mark,
+	loc := #caller_location,
+) {
 	es.vertex_marks[ct.c2v(t, c)] = mark
-	log.debug("marked vertex", ct.c2v(t, c), "as", mark)
+	log.debug("marked vertex", ct.c2v(t, c), "as", mark, location = loc)
 }
 
-is_marked :: proc(es: Encoder_State, t: ct.Corner_Table, c: ct.Corner, mark: Mark) -> bool {
+is_marked :: #force_inline proc(
+	es: Encoder_State,
+	t: ct.Corner_Table,
+	c: ct.Corner,
+	mark: Mark,
+) -> bool {
 	return es.vertex_marks[ct.c2v(t, c)] == mark
 }
 
-tri_step :: proc(es: ^Encoder_State, gate: ct.Corner, step: int) {
+tri_step :: #force_inline proc(
+	es: ^Encoder_State,
+	gate: ct.Corner,
+	step: int,
+	loc := #caller_location,
+) {
 	es.tri_step[ct.c2t(gate)] = step
-	log.debug("triangle", ct.c2t(gate), "step set to", step)
+	log.debug("triangle", ct.c2t(gate), "step set to", step, location = loc)
 }
 
-tri_step_eq :: proc(es: Encoder_State, c: ct.Corner, step: int) -> bool {
+tri_step_eq :: #force_inline proc(es: Encoder_State, c: ct.Corner, step: int) -> bool {
 	return es.tri_step[ct.c2t(c)] == step
 }
 
-emit_symbol :: proc(es: ^Encoder_State, symbol: Operation) {
+emit_symbol :: #force_inline proc(es: ^Encoder_State, symbol: Operation, loc := #caller_location) {
 	append(&es.em.symbols, symbol)
-	log.debug("emitted symbol", symbol)
-	log.debug(es.vertex_marks)
+	log.debug("emitted symbol", symbol, location = loc)
+	log.debug(es.vertex_marks, location = loc)
 }
 
-emit_vertex :: proc(es: ^Encoder_State, pos_or_correction: Vector3) {
+emit_vertex :: #force_inline proc(
+	es: ^Encoder_State,
+	pos_or_correction: Vector3,
+	loc := #caller_location,
+) {
 	append(&es.em.vertices, pos_or_correction)
-	log.debug("emitted pos/cor", pos_or_correction)
+	log.debug("emitted pos/cor", pos_or_correction, location = loc)
+}
+
+emit_topology :: #force_inline proc(es: ^Encoder_State, s, arr: ct.Corner, l: int) {
+	append(&es.em.topology, Topology_Entry{s_corner = s, arrival_corner = arr, hole_len = l})
 }
 
 /****************************** Traversal helpers *****************************/
