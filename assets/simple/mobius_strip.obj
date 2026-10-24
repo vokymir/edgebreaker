@@ -1,0 +1,37 @@
+# mobius strip
+# all triangles are oriented to the middle of object
+
+# bottom
+v 0 0 0
+v 4 0 0
+v 4 4 0
+v 0 4 0
+
+# the "funky part" left
+v -4 2 4
+v 0 2 4
+
+# up
+v 0 4 8
+v 0 0 8
+v 4 4 8
+v 4 0 8
+
+# bottom
+f 1 2 3
+f 1 3 4
+
+# funky left
+f 1 4 5
+f 1 5 6
+
+f 6 5 7
+f 5 7 8
+
+# up
+f 7 9 8
+f 9 10 8
+
+# right
+f 2 10 3
+f 3 10 9
