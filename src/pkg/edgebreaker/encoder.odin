@@ -144,10 +144,9 @@ compress_ct :: proc(es: ^Encoder_State, t: ct.Corner_Table) -> (ok := false, em:
 
 	mark_all_holes(es, t)
 
-	index := 0
-	has_boundary := true
+	index, has_boundary, found := next_component(es^, t)
 
-	for index, has_boundary in next_component(es^, t, index, has_boundary) {
+	for found {
 		log.debug("component found on", index)
 
 		gate := ct.v2c(t, ct.Vertex(index))
@@ -160,9 +159,18 @@ compress_ct :: proc(es: ^Encoder_State, t: ct.Corner_Table) -> (ok := false, em:
 			gate = gate_from_corner(t, gs)
 		}
 
+		// handle initial triangle = only mark two starting gate vertices
+		gs := ct.next(gate)
+		ge := ct.prev(gate)
+		mark(es, t, gs, .VISITED)
+		mark(es, t, ge, .VISITED)
+
 		compress_component(es, t, gate)
+
+		index, has_boundary, found = next_component(es^, t, index, has_boundary)
 	}
 
+	assert(len(em.symbols) == len(t.tris) / 3, "not one symbol per triangle")
 	return true, em
 }
 
@@ -174,6 +182,8 @@ compress_component :: proc(es: ^Encoder_State, t: ct.Corner_Table, gate: ct.Corn
 
 		step := len(es.em.symbols)
 		check_handles(es, t, gate, step)
+
+		assert(tri_step_eq(es^, gate, 0), "triangle visited twice")
 		tri_step(es, gate, step + 1)
 
 		right := ct.op(t, ct.next(gate))
@@ -219,7 +229,13 @@ S :: proc(es: ^Encoder_State, t: ct.Corner_Table, gate: ct.Corner, step: int) ->
 		es.hole_len_of_s[step] = holes_count
 	}
 
-	return ct.INVALID_CORNER
+	left := ct.op(t, ct.prev(gate))
+	right := ct.op(t, ct.next(gate))
+
+	emit_symbol(es, .S)
+	push_gate(es, left)
+
+	return right
 }
 
 check_handles :: proc(es: ^Encoder_State, t: ct.Corner_Table, gate: ct.Corner, step: int) {
@@ -251,6 +267,10 @@ check_handles :: proc(es: ^Encoder_State, t: ct.Corner_Table, gate: ct.Corner, s
 
 }
 
+push_gate :: proc(es: ^Encoder_State, gate: ct.Corner) {
+	append(&es.gate_stack, gate)
+}
+
 pop_unvisited :: proc(es: ^Encoder_State) -> ct.Corner {
 	for {
 		if len(es.gate_stack) == 0 {return ct.INVALID_CORNER}
@@ -275,7 +295,7 @@ mark_all_holes :: proc(es: ^Encoder_State, t: ct.Corner_Table) {
 
 	for c in t.v2c {
 
-		if ct.border_c(t, c) {
+		if ct.border_v(t, ct.c2v(t, c)) {
 			mark(es, t, c, .HOLE)
 		}
 	}
@@ -302,6 +322,7 @@ visit_hole :: proc(es: ^Encoder_State, t: ct.Corner_Table, gate: ct.Corner) -> i
 		v := ct.c2v(t, next)
 		if v == initial {return n}
 
+		n += 1
 		mark(es, t, next, .VISITED)
 		emit_vertex(es, t.pos[v]) // TODO: use predictor here OR inside
 		// emit_vertex
@@ -353,7 +374,7 @@ next_component :: proc(
 	es: Encoder_State,
 	t: ct.Corner_Table,
 	start := 0,
-	search_first_for_boundary := true,
+	search_first_holes := true,
 ) -> (
 	index: int,
 	found_in_boundary: bool,
@@ -363,15 +384,15 @@ next_component :: proc(
 	marks := es.vertex_marks
 
 	log.debug(marks)
-	if search_first_for_boundary {
+	if search_first_holes {
 		for mark, i in marks[start:] {
-			if mark == .NOT_VISITED && ct.border_v(t, ct.Vertex(i)) {
-				log.debug("found on boundary:", i)
+			if mark == .HOLE {
+				log.debug("found on border:", i)
 				return start + i, true, true
 			}
 		}
 		// not found on boundary, continue search in closed mesh
-		log.debug("not found on boundary")
+		log.debug("not found on border")
 		start = 0
 	}
 

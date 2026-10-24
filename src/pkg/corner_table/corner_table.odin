@@ -178,6 +178,9 @@ border_v :: proc(ct: Corner_Table, v: Vertex) -> bool {
 	return found
 }
 
+/*
+   TODO: only return true if corner is bordering??? maybe not, then raname
+*/
 border_c :: proc(ct: Corner_Table, c: Corner) -> bool {
 	_, found := v2c_right_border(ct, c2v(ct, c))
 	return found
