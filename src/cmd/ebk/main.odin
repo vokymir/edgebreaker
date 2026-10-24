@@ -35,31 +35,34 @@ main :: proc() {
 	if len(outf) == 0 {
 		outf = strings.concatenate({filepath.stem(opt.input), ".output_kamo"}, context.allocator)
 	}
-	fmt.println(outf)
 
 	switch filepath.ext(opt.input) {
 	case ".obj":
-		fmt.println("loading obj")
 		table: ct.Corner_Table
 		ct.init(&table)
-		ct.load(&table, opt.input)
-		// ct.save(table, opt.input)
+		defer ct.destroy(&table)
+
+		if !ct.load(&table, opt.input) {
+			log.fatal("cannot load", opt.input)
+			os.exit(1)
+		}
+
+		// TODO: validate orientation here???
+
+		ok, em := eb.compress(table, eb.predictor_of(opt.predictor))
+		if !ok {
+			log.fatal("compression failed")
+			os.exit(1)
+		}
+		defer free(em) // runs second
+		defer eb.destroy_em(em) // runs first
 
 		f, err := os.open(outf, {.Write, .Create, .Trunc})
 		if err != nil {
-			panic("invalid output path")
+			log.fatal("cannot open output", outf)
+			os.exit(1)
 		}
 		defer os.close(f)
-
-		es: eb.Encoder_State
-		eb.init_es(&es, len(table.pos), len(table.tris)) //, predictor = eb.Predictor_Parallelogram)
-
-		fmt.println("compressing")
-		ok, em := eb.compress(&es, table)
-		eb.destroy_es(&es)
-		defer free(em)
-		defer eb.destroy_em(em)
-		fmt.println("done")
 
 		fmt.println("== SYMBOLS ==")
 		for s in em.symbols {
@@ -77,6 +80,13 @@ main :: proc() {
 		fmt.println("== COMPONENTS ==")
 		for c in em.components {
 			fmt.println(c.outer_boundary)
+		}
+
+		switch opt.handler {
+		case .SYMBOL:
+		// eb.write_symbols(f, em)
+		case .RAW:
+		// eb.write_raw(f, em)
 		}
 	// encode
 	case ".ebk":
