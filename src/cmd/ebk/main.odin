@@ -57,6 +57,8 @@ main :: proc() {
 		fmt.println("compressing")
 		ok, em := eb.compress(&es, table)
 		eb.destroy_es(&es)
+		defer free(&em) // TODO: is the order of freeing correct?
+		defer eb.destroy_em(em)
 		fmt.println("done")
 
 		for s in em.symbols {
