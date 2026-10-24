@@ -3,80 +3,8 @@ package edgebreaker
 import ct "../corner_table"
 import "base:runtime"
 import "core:log"
-import "core:slice"
 
 /***************************** Structs ****************************************/
-
-/*
-Stores the state of edgebreaker algorithm during compression.
-Is only used with corner table.
-*/
-Encoder_State :: struct {
-	// for destroy
-	allocator:          runtime.Allocator,
-
-	// as many as vertices, ordered as in ct.geometry
-	vertex_marks:       []Mark,
-	// in which step a triangle was discovered (0=never)
-	tri_step:           []int,
-	// store the opposite corner in the same triangle (ie the v corner)
-	gate_stack:         [dynamic]ct.Corner,
-	// store S step -> number of hole vertices
-	hole_len_of_s:      map[int]int,
-
-	// flag necessary to handle first triangle
-	first_in_component: bool,
-
-	// predicts position of next vertex
-	predictor:          Predictor,
-
-	// ptr to resulting mesh
-	em:                 ^Encoded_Mesh,
-}
-
-/*
-Initialize Encoder State for Edgebreaker compression with Corner Table.
-*/
-init_es :: proc(
-	es: ^Encoder_State,
-	n_vertices, n_triangles: int,
-	predictor := Predictor_None,
-	allocator := context.allocator,
-	loc := #caller_location,
-) {
-	es.vertex_marks = make([]Mark, n_vertices, allocator, loc)
-	slice.fill(es.vertex_marks[:], Mark.NOT_VISITED)
-
-	es.tri_step = make([]int, n_triangles, allocator, loc)
-
-	es.gate_stack = make([dynamic]ct.Corner, allocator, loc)
-
-	es.hole_len_of_s = make(map[int]int, allocator, loc)
-
-	es.predictor = predictor
-	es.allocator = allocator
-}
-
-/*
-Destroy internals of Encoder State.
-WARN: caller must deallocate predictor (if necessary)
-*/
-destroy_es :: proc(es: ^Encoder_State, loc := #caller_location) {
-	delete(es.vertex_marks, es.allocator, loc)
-	delete(es.tri_step, es.allocator, loc)
-	delete(es.gate_stack, loc)
-	delete(es.hole_len_of_s, loc)
-}
-
-/*
-Marks vertices as the algorithm goes through the mesh.
-*/
-@(private = "file")
-Mark :: enum {
-	NOT_VISITED,
-	VISITED,
-	HOLE,
-}
 
 /***************************** Compression ************************************/
 
@@ -284,7 +212,7 @@ Pushes gate to es.gate_stack.
 */
 @(private = "file")
 push_gate :: #force_inline proc(es: ^Encoder_State, gate: ct.Corner) {
-	append(&es.gate_stack, gate)
+	append(&es.gate_stack, Gate(gate))
 }
 
 /*
@@ -297,8 +225,8 @@ pop_unvisited :: #force_inline proc(es: ^Encoder_State) -> ct.Corner {
 
 		candidate := pop(&es.gate_stack)
 
-		if tri_step_eq(es^, candidate, 0) {
-			return candidate
+		if tri_step_eq(es^, ct.Corner(candidate), 0) {
+			return ct.Corner(candidate)
 		}
 	}
 }
