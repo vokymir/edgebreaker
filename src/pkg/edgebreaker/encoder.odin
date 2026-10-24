@@ -15,22 +15,25 @@ Vector3 :: [3]f32
 
 Encoder_State :: struct {
 	// for destroy
-	allocator:     runtime.Allocator,
+	allocator:          runtime.Allocator,
 
 	// as many as vertices, ordered as in ct.geometry
-	vertex_marks:  []Mark,
+	vertex_marks:       []Mark,
 	// in which step a triangle was discovered (0=never)
-	tri_step:      []int,
+	tri_step:           []int,
 	// store the opposite corner in the same triangle (ie the v corner)
-	gate_stack:    [dynamic]ct.Corner,
+	gate_stack:         [dynamic]ct.Corner,
 	// store S step -> number of hole vertices
-	hole_len_of_s: map[int]int,
+	hole_len_of_s:      map[int]int,
+
+	// flag necessary to handle first triangle
+	first_in_component: bool,
 
 	// predicts position of next vertex
-	predictor:     Predictor,
+	predictor:          Predictor,
 
 	// ptr to resulting mesh
-	em:            ^Encoded_Mesh,
+	em:                 ^Encoded_Mesh,
 }
 
 init_es :: proc(
@@ -162,12 +165,6 @@ compress_ct :: proc(es: ^Encoder_State, t: ct.Corner_Table) -> (ok := false, em:
 			gate = gate_from_corner(t, gs)
 		}
 
-		// handle initial triangle = only mark two starting gate vertices
-		gs := ct.next(gate)
-		ge := ct.prev(gate)
-		mark(es, t, gs, .VISITED)
-		mark(es, t, ge, .VISITED)
-
 		compress_component(es, t, gate)
 
 		index, has_boundary, found = next_component(es^, t, index, has_boundary)
@@ -217,7 +214,6 @@ initial_triangle :: proc(es: ^Encoder_State, t: ct.Corner_Table, gate: ct.Corner
 	ge := ct.prev(gate)
 
 	if ct.border_v(t, ct.c2v(t, gs)) { 	// on border
-		emit_vertex(es, ct.pos(t, ge))
 		l := visit_hole(es, t, ge)
 
 		// TODO: this is only for now
@@ -231,12 +227,14 @@ initial_triangle :: proc(es: ^Encoder_State, t: ct.Corner_Table, gate: ct.Corner
 		emit_vertex(es, ct.pos(t, gs))
 		emit_vertex(es, ct.pos(t, ge))
 	}
+
+	es.first_in_component = true
 }
 
 C :: proc(es: ^Encoder_State, t: ct.Corner_Table, gate: ct.Corner) -> ct.Corner {
 	emit_symbol(es, .C)
 
-	if len(es.em.symbols) > 1 {
+	if !es.first_in_component {
 		gs_pos := ct.pos(t, ct.next(gate))
 		ge_pos := ct.pos(t, ct.prev(gate))
 		o_pos := ct.pos(t, ct.op(t, gate))
@@ -252,6 +250,7 @@ C :: proc(es: ^Encoder_State, t: ct.Corner_Table, gate: ct.Corner) -> ct.Corner 
 		emit_vertex(es, correction)
 	} else { 	// initial triangle must emit absolute position
 		emit_vertex(es, ct.pos(t, gate))
+		es.first_in_component = false
 	}
 
 	mark(es, t, gate, .VISITED)
@@ -266,10 +265,10 @@ S :: proc(es: ^Encoder_State, t: ct.Corner_Table, gate: ct.Corner, step: int) ->
 
 	if is_marked(es^, t, gate, .HOLE) {
 
-		holes_count := visit_hole(es, t, gate)
-		if holes_count <= 0 {log.panic("Hole is too short.")}
+		hole_count := visit_hole(es, t, gate)
+		if hole_count <= 0 {log.panic("Hole is too short.")}
 
-		es.hole_len_of_s[step] = holes_count
+		es.hole_len_of_s[step] = hole_count
 	}
 
 	left := ct.op(t, ct.prev(gate))
@@ -277,8 +276,6 @@ S :: proc(es: ^Encoder_State, t: ct.Corner_Table, gate: ct.Corner, step: int) ->
 
 	emit_symbol(es, .S)
 	push_gate(es, left)
-
-	mark(es, t, gate, .VISITED)
 
 	return right
 }
@@ -346,21 +343,22 @@ mark_all_holes :: proc(es: ^Encoder_State, t: ct.Corner_Table) {
 /*
 Mark all vertices in the hole as visited and return number of those vertices =
 length of hole.
+
+Starting from gate-vertex all vertices are marked & emitted.
 */
 @(private = "file")
 visit_hole :: proc(es: ^Encoder_State, t: ct.Corner_Table, gate: ct.Corner) -> int {
 	log.debug(is_marked(es^, t, gate, .HOLE), ct.border_v(t, ct.c2v(t, gate)))
 
-	// !is_marked(es^, t, gate, .HOLE) ||  // it was making trouble in
-	// initial_triangle()
 	if !ct.border_v(t, ct.c2v(t, gate)) {return 0}
 	log.debug("gate:", gate)
 
 	mark(es, t, gate, .VISITED)
+	emit_vertex(es, ct.pos(t, gate))
 
 	initial := ct.c2v(t, gate)
 	current := gate
-	n := 1 // initialized with 1st vertex
+	n := 1 // for the initial gate vertex
 
 	for {
 		next, found := ct.next_on_border(t, current)
@@ -373,8 +371,7 @@ visit_hole :: proc(es: ^Encoder_State, t: ct.Corner_Table, gate: ct.Corner) -> i
 
 		n += 1
 		mark(es, t, next, .VISITED)
-		// TODO: there maybe might be used predictor? but I don't assume so
-		emit_vertex(es, t.pos[v])
+		emit_vertex(es, ct.pos(t, ct.v2c(t, v)))
 
 		current = next
 	}
