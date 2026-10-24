@@ -1,0 +1,9 @@
+# de-facto 2D non-orientable rectangle
+
+v 0 0 0
+v 1 0 0.1
+v 1 2 0.13
+v 0 2 -0.1
+
+f 1 2 3
+f 4 3 1

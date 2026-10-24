@@ -1,0 +1,17 @@
+# simplest object I could think of with hole in the middle
+
+v 0 10 0
+v 15 15 0
+v 10 10 0
+v 5 5 0
+v 0 0 0
+v 10 0 0
+v 15 -5 0
+
+f 1 3 2
+f 1 4 3
+f 1 5 4
+f 4 5 6
+f 6 5 7
+f 2 3 6
+f 6 7 2

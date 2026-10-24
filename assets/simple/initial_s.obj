@@ -1,0 +1,11 @@
+# the initial symbol must be S here
+
+v 1 0 0
+v 0 1 0
+v -1 0 0
+v -2 2 1
+v 2 2 -1
+
+f 1 2 3
+f 3 2 4
+f 1 5 2
