@@ -358,6 +358,7 @@ visit_hole :: proc(es: ^Encoder_State, t: ct.Corner_Table, gate: ct.Corner) -> i
 
 mark :: proc(es: ^Encoder_State, t: ct.Corner_Table, c: ct.Corner, mark: Mark) {
 	es.vertex_marks[ct.c2v(t, c)] = mark
+	log.debug("marked vertex", ct.c2v(t, c), "as", mark)
 }
 
 is_marked :: proc(es: Encoder_State, t: ct.Corner_Table, c: ct.Corner, mark: Mark) -> bool {
@@ -366,6 +367,7 @@ is_marked :: proc(es: Encoder_State, t: ct.Corner_Table, c: ct.Corner, mark: Mar
 
 tri_step :: proc(es: ^Encoder_State, gate: ct.Corner, step: int) {
 	es.tri_step[ct.c2t(gate)] = step
+	log.debug("triangle", ct.c2t(gate), "step set to", step)
 }
 
 tri_step_eq :: proc(es: Encoder_State, c: ct.Corner, step: int) -> bool {
@@ -374,10 +376,13 @@ tri_step_eq :: proc(es: Encoder_State, c: ct.Corner, step: int) -> bool {
 
 emit_symbol :: proc(es: ^Encoder_State, symbol: Operation) {
 	append(&es.em.symbols, symbol)
+	log.debug("emitted symbol", symbol)
+	log.debug(es.vertex_marks)
 }
 
 emit_vertex :: proc(es: ^Encoder_State, pos_or_correction: Vector3) {
 	append(&es.em.vertices, pos_or_correction)
+	log.debug("emitted pos/cor", pos_or_correction)
 }
 
 /****************************** Traversal helpers *****************************/
