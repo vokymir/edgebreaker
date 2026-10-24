@@ -137,10 +137,10 @@ The caller is responsible for freeing returned em.
 */
 @(private, require_results)
 compress_ct :: proc(es: ^Encoder_State, t: ct.Corner_Table) -> (ok := false, em: ^Encoded_Mesh) {
-	log.debug(t.geometry)
+	log.debug(t.pos)
 
 	em = new(Encoded_Mesh)
-	init_em(em, len(t.vertices) / 3, len(t.geometry), es)
+	init_em(em, len(t.tris) / 3, len(t.pos), es)
 
 	mark_all_holes(es, t)
 
@@ -150,13 +150,13 @@ compress_ct :: proc(es: ^Encoder_State, t: ct.Corner_Table) -> (ok := false, em:
 	for index, has_boundary in next_component(es^, t, index, has_boundary) {
 		log.debug("component found on", index)
 
-		gate := ct.corner_of_vertex(t, ct.Vertex(index))
+		gate := ct.v2c(t, ct.Vertex(index))
 		if has_boundary {
 			//     v                             v      which is handled
 			//   /  \     OR this may happen:  /  \     in the gate_from_corner()
 			// gs -- ge                      ge -- gs   case
 			// as in gate start & gate end
-			gs, _ := ct.rightmost_boundary_corner_of_vertex(t, ct.Vertex(index))
+			gs, _ := ct.v2c_right_border(t, ct.Vertex(index))
 			gate = gate_from_corner(t, gs)
 		}
 
@@ -176,10 +176,10 @@ compress_component :: proc(es: ^Encoder_State, t: ct.Corner_Table, gate: ct.Corn
 		check_handles(es, t, gate, step)
 		tri_step(es, gate, step + 1)
 
-		right := ct.opposite_corner(t, ct.next_corner(gate))
-		left := ct.opposite_corner(t, ct.prev_corner(gate))
-		right_done := right == ct.INVALID_CORNER || es.tri_step[ct.triangle_of_corner(right)] != 0
-		left_done := left == ct.INVALID_CORNER || es.tri_step[ct.triangle_of_corner(left)] != 0
+		right := ct.op(t, ct.next(gate))
+		left := ct.op(t, ct.prev(gate))
+		right_done := right == ct.INVALID_CORNER || es.tri_step[ct.c2t(right)] != 0
+		left_done := left == ct.INVALID_CORNER || es.tri_step[ct.c2t(left)] != 0
 
 		switch {
 		case is_marked(es^, t, gate, .NOT_VISITED):
@@ -199,11 +199,11 @@ compress_component :: proc(es: ^Encoder_State, t: ct.Corner_Table, gate: ct.Corn
 
 C :: proc(es: ^Encoder_State, t: ct.Corner_Table, gate: ct.Corner) -> ct.Corner {
 	emit_symbol(es, .C)
-	emit_vertex(es, ct.corner_position(t, gate))
+	emit_vertex(es, ct.pos(t, gate))
 
 	mark(es, t, gate, .VISITED)
 
-	right := ct.opposite_corner(t, ct.next_corner(gate))
+	right := ct.op(t, ct.next(gate))
 	return right
 }
 
@@ -228,13 +228,13 @@ check_handles :: proc(es: ^Encoder_State, t: ct.Corner_Table, gate: ct.Corner, s
 	sides := [2]struct {
 		edge_corner: ct.Corner,
 		k:           ct.Corner,
-	}{{ct.next_corner(gate), 1}, {ct.prev_corner(gate), 2}}
+	}{{ct.next(gate), 1}, {ct.prev(gate), 2}}
 
 	for s in sides {
-		n := ct.opposite_corner(t, s.edge_corner)
+		n := ct.op(t, s.edge_corner)
 		if n == ct.INVALID_CORNER {continue} 	// mesh border
 
-		n_step := es.tri_step[ct.triangle_of_corner(n)]
+		n_step := es.tri_step[ct.c2t(n)]
 		if n_step == 0 {continue} 	// not visited yet
 		if es.em.symbols[n_step - 1] != .S {continue}
 
@@ -273,9 +273,9 @@ Complexity: theta(n)
 @(private = "file")
 mark_all_holes :: proc(es: ^Encoder_State, t: ct.Corner_Table) {
 
-	for c in t.vertex_corners {
+	for c in t.v2c {
 
-		if ct.c_on_boundary(t, c) {
+		if ct.border_c(t, c) {
 			mark(es, t, c, .HOLE)
 		}
 	}
@@ -287,23 +287,23 @@ length of hole (excluding gate).
 */
 @(private = "file")
 visit_hole :: proc(es: ^Encoder_State, t: ct.Corner_Table, gate: ct.Corner) -> int {
-	if !is_marked(es^, t, gate, .HOLE) || !ct.c_on_boundary(t, gate) {return 0}
+	if !is_marked(es^, t, gate, .HOLE) || !ct.border_c(t, gate) {return 0}
 
-	initial := ct.vertex_of_corner(t, gate)
+	initial := ct.c2v(t, gate)
 	current := gate
 	n := 0
 
 	for {
-		next, found := ct.next_boundary_corner(t, current)
+		next, found := ct.next_on_border(t, current)
 		if !found {
 			log.panic("Cannot find next boundary corner in hole.")
 		}
 
-		v := ct.vertex_of_corner(t, next)
+		v := ct.c2v(t, next)
 		if v == initial {return n}
 
 		mark(es, t, next, .VISITED)
-		emit_vertex(es, t.geometry[v]) // TODO: use predictor here OR inside
+		emit_vertex(es, t.pos[v]) // TODO: use predictor here OR inside
 		// emit_vertex
 
 		current = next
@@ -315,19 +315,19 @@ visit_hole :: proc(es: ^Encoder_State, t: ct.Corner_Table, gate: ct.Corner) -> i
 /******************************* Clarity helpers ******************************/
 
 mark :: proc(es: ^Encoder_State, t: ct.Corner_Table, c: ct.Corner, mark: Mark) {
-	es.vertex_marks[ct.vertex_of_corner(t, c)] = mark
+	es.vertex_marks[ct.c2v(t, c)] = mark
 }
 
 is_marked :: proc(es: Encoder_State, t: ct.Corner_Table, c: ct.Corner, mark: Mark) -> bool {
-	return es.vertex_marks[ct.vertex_of_corner(t, c)] == mark
+	return es.vertex_marks[ct.c2v(t, c)] == mark
 }
 
 tri_step :: proc(es: ^Encoder_State, gate: ct.Corner, step: int) {
-	es.tri_step[ct.triangle_of_corner(gate)] = step
+	es.tri_step[ct.c2t(gate)] = step
 }
 
 tri_step_eq :: proc(es: Encoder_State, c: ct.Corner, step: int) -> bool {
-	return es.tri_step[ct.triangle_of_corner(c)] == step
+	return es.tri_step[ct.c2t(c)] == step
 }
 
 emit_symbol :: proc(es: ^Encoder_State, symbol: Operation) {
@@ -365,7 +365,7 @@ next_component :: proc(
 	log.debug(marks)
 	if search_first_for_boundary {
 		for mark, i in marks[start:] {
-			if mark == .NOT_VISITED && ct.vertex_is_on_boundary(t, ct.Vertex(i)) {
+			if mark == .NOT_VISITED && ct.border_v(t, ct.Vertex(i)) {
 				log.debug("found on boundary:", i)
 				return start + i, true, true
 			}
@@ -393,14 +393,14 @@ From a corner which might be on boundary return the corresponding gate vertex.
 gate_from_corner :: proc(t: ct.Corner_Table, c: ct.Corner) -> (gate: ct.Corner) {
 	gs := c // take any corner as gate_start from the triangle
 
-	ge := ct.next_corner(gs)
+	ge := ct.next(gs)
 
 	// if ge is in fact gate, move gs
-	if !ct.vertex_is_on_boundary(t, ct.vertex_of_corner(t, ge)) {
-		gs = ct.prev_corner(gs)
+	if !ct.border_v(t, ct.c2v(t, ge)) {
+		gs = ct.prev(gs)
 	}
 	// else is gs correct & no need to do anything
 
-	gate = ct.prev_corner(gs)
+	gate = ct.prev(gs)
 	return gate
 }

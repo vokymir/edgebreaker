@@ -52,7 +52,7 @@ main :: proc() {
 		defer os.close(f)
 
 		es: eb.Encoder_State
-		eb.init_es(&es, len(table.geometry), len(table.vertices))
+		eb.init_es(&es, len(table.pos), len(table.tris))
 
 		fmt.println("compressing")
 		ok, em := eb.compress(&es, table)
