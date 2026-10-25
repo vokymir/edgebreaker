@@ -54,6 +54,8 @@ compress_ct :: proc(
 	em: ^Encoded_Mesh,
 ) {
 	log.debug(t.pos)
+	assert_nice_mesh(t, allocator, loc)
+
 	es: Encoder_State_CT
 	init_es_ct(&es, t, predictor, allocator, loc)
 	defer destroy_es_ct(&es, loc)
@@ -578,4 +580,75 @@ assert_component_euler :: proc(es: Encoder_State_CT, sym0, vert0, topo0: int, ha
 
 	expected := has_boundary ? 1 - chi : 2 - chi // (6)
 	assert(n_entries == expected, "topology entries don't match Euler characteristic")
+}
+
+/*
+Report about the mesh - observes its edges.
+*/
+@(private = "file")
+Mesh_Report :: struct {
+	// # edges in the same direction (should be 0 for orientable surfaces)
+	same_dir:     int,
+	// # edges which are used more than two times, should be 0 for manifolds
+	over_shared:  int,
+	// # border edges
+	border:       int,
+	// # unreferenced vertices
+	unreferenced: int,
+}
+
+/*
+Report about the mesh "niceness". One algorithm might not be comfortable with
+some mesh characteristics and this proc helps find that.
+*/
+@(private = "file")
+diagnose_mesh :: proc(
+	t: ct.Corner_Table,
+	allocator := context.allocator,
+	loc := #caller_location,
+) -> (
+	r: Mesh_Report,
+) {
+	Edge :: struct {
+		a, b: ct.Vertex,
+	}
+	count := make(map[Edge]int, allocator, loc)
+	defer delete(count, loc)
+	used := make([]bool, len(t.pos), allocator, loc)
+	defer delete(used, allocator, loc)
+
+	// go through all triangles (1 triangle is done after three iterations of i)
+	for i in 0 ..< len(t.tris) {
+		c := ct.Corner(i)
+		used[t.tris[c]] = true
+		count[Edge{t.tris[ct.next(c)], t.tris[ct.prev(c)]}] += 1
+	}
+
+	// go through all counted edges
+	for e, n in count {
+		reverse := count[Edge{e.b, e.a}] // 0 if absent
+		if n > 1 {r.same_dir += 1} 	// oriented edge used multiple times
+		if n + reverse > 2 {r.over_shared += 1} 	// unoriented edge used multiple times
+		if reverse == 0 {r.border += n} 	// +n or +1 is pretty irrelevant for now
+	}
+
+	// go through all vertices in corner table
+	for u in used {if !u {r.unreferenced += 1}}
+
+	return r
+}
+
+@(private = "file", disabled = ODIN_DISABLE_ASSERT)
+assert_nice_mesh :: proc(
+	t: ct.Corner_Table,
+	allocator := context.allocator,
+	loc := #caller_location,
+) {
+	r := diagnose_mesh(t)
+
+	assert(r.same_dir == 0, "Mesh contains non-orientable faces.", loc)
+
+	assert(r.over_shared == 0, "Mesh contains non-manifold edges.", loc)
+
+	assert(r.unreferenced == 0, "Mesh contains unreferenced vertices.", loc)
 }
