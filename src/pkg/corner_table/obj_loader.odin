@@ -38,7 +38,7 @@ load_obj_to_ct :: proc(
 ) {
 	data, err := os.read_entire_file(filepath, allocator, loc)
 	if err != nil {
-		log.debug("cannot read entire file")
+		log.debug("cannot read entire file:", filepath, err)
 		return
 	}
 	defer delete(data, allocator)
@@ -77,7 +77,7 @@ process_line :: proc(
 	ok := false,
 ) {
 	if len(line) < 2 {
-		log.debug("line too short")
+		log.debug("line too short:", len(line), "<", 2)
 		return
 	}
 	switch line[0:2] {
