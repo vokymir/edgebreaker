@@ -33,7 +33,7 @@ main :: proc() {
 
 	outf := opt.output
 	if len(outf) == 0 {
-		outf = strings.concatenate({filepath.stem(opt.input), ".output_kamo"}, context.allocator)
+		outf = strings.concatenate({filepath.stem(opt.input), ".simple.ebk"}, context.allocator)
 	}
 
 	switch filepath.ext(opt.input) {
@@ -47,8 +47,6 @@ main :: proc() {
 			os.exit(1)
 		}
 
-		// TODO: validate orientation here???
-
 		ok, em := eb.compress(table, eb.predictor_of(opt.predictor))
 		if !ok {
 			log.fatal("compression failed")
@@ -57,38 +55,10 @@ main :: proc() {
 		defer free(em) // runs second
 		defer eb.destroy_em(em) // runs first
 
-		f, err := os.open(outf, {.Write, .Create, .Trunc})
-		if err != nil {
-			log.fatal("cannot open output", outf)
-			os.exit(1)
+		log.debug("start write")
+		if !eb.write(em^, outf) {
+			log.fatal("write failed")
 		}
-		defer os.close(f)
-
-		fmt.println("== SYMBOLS ==")
-		for s in em.symbols {
-			fmt.print(s)
-		}
-		fmt.println()
-		fmt.println("== VERTICES ==")
-		for v in em.vertices {
-			fmt.println("v", v[0], v[1], v[2])
-		}
-		fmt.println("== TOPOLOGY ==")
-		for t in em.topology {
-			fmt.println(t.s_step, t.arrival_step, t.arrival_side, t.hole_len)
-		}
-		fmt.println("== COMPONENTS ==")
-		for c in em.components {
-			fmt.println(c.outer_boundary)
-		}
-
-		switch opt.handler {
-		case .SYMBOL:
-		// eb.write_symbols(f, em)
-		case .RAW:
-		// eb.write_raw(f, em)
-		}
-	// encode
 	case ".ebk":
 	//decode
 	}
