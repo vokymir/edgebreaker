@@ -31,7 +31,7 @@ Predictor_Parallelogram :: Predictor {
 
 /**************************** STRUCTS *****************************************/
 
-Predictor_Kind :: enum {
+Predictor_Kind :: enum u8 {
 	NONE,
 	PARALLELOGRAM,
 }
