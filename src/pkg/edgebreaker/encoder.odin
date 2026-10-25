@@ -77,9 +77,10 @@ Encoder_State :: struct {
 Store the encoded mesh as a sequence of consecutive CLERS symbols, a list of all
 vertices in the order of appeareance and a list of topology entries.
 
-TODO: maybe it will need to store some additional metada, eg. predictor
+By itself this is sufficient to restore the compressed mesh.
 */
 Encoded_Mesh :: struct {
+	predictor:  Predictor_Kind,
 	symbols:    [dynamic]Operation,
 	vertices:   [dynamic]Vector3,
 	topology:   [dynamic]Topology_Entry,
