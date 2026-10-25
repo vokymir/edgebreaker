@@ -1,5 +1,6 @@
 package corner_table
 
+import "core:log"
 import "core:os"
 import "core:slice"
 import "core:strconv"
@@ -37,6 +38,7 @@ load_obj_to_ct :: proc(
 ) {
 	data, err := os.read_entire_file(filepath, allocator, loc)
 	if err != nil {
+		log.debug("cannot read entire file")
 		return
 	}
 	defer delete(data, allocator)
@@ -52,7 +54,7 @@ load_obj_to_ct :: proc(
 	// part 2:
 	build_topology(ct, allocator, loc)
 
-	return
+	return true
 }
 
 /*
@@ -75,6 +77,7 @@ process_line :: proc(
 	ok := false,
 ) {
 	if len(line) < 2 {
+		log.debug("line too short")
 		return
 	}
 	switch line[0:2] {
@@ -109,6 +112,7 @@ process_vertex :: proc(
 	tokens := strings.fields(line, allocator, loc)
 	defer delete(tokens, allocator)
 	if len(tokens) < 4 || len(tokens) > 5 {
+		log.debug("too few tokens")
 		return
 	}
 
@@ -149,11 +153,13 @@ process_face :: proc(
 	tokens := strings.fields(line, allocator, loc)
 	defer delete(tokens, allocator)
 	if len(tokens) < 4 {
+		log.debug("too few tokens")
 		return
 	}
 
 	v1 := parse_face_vertex(tokens[1]) or_return
 	if int(v1) < 0 || int(v1) >= len(ct.pos) {
+		log.debug("v1 is not parsable")
 		return
 	}
 
@@ -164,9 +170,11 @@ process_face :: proc(
 		v3 := parse_face_vertex(tokens[i]) or_return
 
 		if int(v2) < 0 || int(v2) >= len(ct.pos) {
+			log.debug("v2 is not parsable")
 			return
 		}
 		if int(v3) < 0 || int(v3) >= len(ct.pos) {
+			log.debug("v3 is not parsable")
 			return
 		}
 
@@ -192,11 +200,13 @@ Returns:
 parse_face_vertex :: proc(str: string) -> (v: Vertex, ok := false) {
 	tokens := strings.split(str, "/")
 	if len(tokens) == 0 || len(tokens[0]) == 0 {
+		log.debug("too few tokens")
 		return
 	}
 
 	v_int := strconv.parse_int(tokens[0]) or_return
 	if v_int == 0 {
+		log.debug("invalid vertex number (only support >0)")
 		return
 	}
 
@@ -224,6 +234,7 @@ build_topology :: proc(
 	allocator := context.allocator,
 	loc := #caller_location,
 ) {
+	log.debug("start topology build")
 	num_corners := len(ct.tris)
 	num_vertices := len(ct.pos)
 
