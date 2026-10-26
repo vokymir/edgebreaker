@@ -100,6 +100,7 @@ decode_wrap_and_zip_ct :: proc(
 	init_ds(&ds, em, t, allocator, loc)
 	defer destroy_ds(&ds)
 
+	log.debug("starting decoding")
 	V_(&ds, 0, 0); V_(&ds, 1, 1); V_(&ds, 2, 2)
 	O_(&ds, 0, FREE_LEFT_CORNER); O_(&ds, 2, FREE_LEFT_CORNER)
 
@@ -124,6 +125,7 @@ decode_wrap_and_zip_ct :: proc(
 @(private = "file")
 decode_connectivity :: proc(ds: ^Decoding_State, em: Encoded_Mesh, c: ct.Corner) {
 	c := c
+	log.debug("decoding connectivity for corner", c)
 
 	for {
 		ds.T += 1
@@ -132,19 +134,24 @@ decode_connectivity :: proc(ds: ^Decoding_State, em: Encoded_Mesh, c: ct.Corner)
 
 		switch read_clers(ds, em) {
 		case .C:
+			log.debug("C")
 			O_(ds, N(c), ct.INVALID_CORNER)
 			ds.N += 1
 			V_(ds, ct.Corner(3 * ds.T), ds.N)
 		case .L:
+			log.debug("L")
 			O_(ds, N(c), FREE_RIGHT_CORNER)
 			zip(ds, em, N(c))
 		case .R:
+			log.debug("R")
 			O_(ds, c, FREE_RIGHT_CORNER)
 			c = N(c)
 		case .S:
+			log.debug("S")
 			decode_connectivity(ds, em, c)
 			c = N(c)
 		case .E:
+			log.debug("E")
 			O_(ds, c, FREE_RIGHT_CORNER)
 			O_(ds, N(c), FREE_RIGHT_CORNER)
 			zip(ds, em, N(c))
@@ -156,11 +163,13 @@ decode_connectivity :: proc(ds: ^Decoding_State, em: Encoded_Mesh, c: ct.Corner)
 @(private = "file")
 decode_vertices :: proc(ds: ^Decoding_State, em: Encoded_Mesh, c: ct.Corner) {
 	c := c
+	log.debug("decoding vertices for corner", c)
 
 	for {
-		U_(ds, ct.Triangle(V(ds^, c)), .VISITED)
+		U_(ds, T(c), .VISITED)
 
 		if M(ds^, V(ds^, c)) != .VISITED {
+			log.debug("vertex visited")
 			ds.N += 1
 			prediction := predictor_of(em.predictor).predict(
 			{c_p_v_g(ds^, c), c_n_v_g(ds^, c), c_o_v_g(ds^, c)},
@@ -171,16 +180,23 @@ decode_vertices :: proc(ds: ^Decoding_State, em: Encoded_Mesh, c: ct.Corner) {
 			M_(ds, V(ds^, c), .VISITED)
 			c = R(ds^, c)
 		} else {
+			log.debug("vertex not visited")
 			if c_r_t_u(ds^, c) == .VISITED {
+				log.debug("crtu visited")
 				if c_l_t_u(ds^, c) == .VISITED {
+					log.debug("cltu visited")
 					return
 				} else {
+					log.debug("cltu not visited")
 					c = L(ds^, c)
 				}
 			} else {
+				log.debug("crtu not visited")
 				if c_l_t_u(ds^, c) == .VISITED {
+					log.debug("cltu visited")
 					c = R(ds^, c)
 				} else {
+					log.debug("cltu not visited")
 					decode_vertices(ds, em, R(ds^, c))
 					c = L(ds^, c)
 				}
@@ -193,12 +209,16 @@ decode_vertices :: proc(ds: ^Decoding_State, em: Encoded_Mesh, c: ct.Corner) {
 zip :: proc(ds: ^Decoding_State, em: Encoded_Mesh, c: ct.Corner) {
 	c := c
 	b := N(c)
+	log.debug("zipping for corner", c)
 
 	for O(ds^, b) >= 0 {
 		b = N(O(ds^, b))
 	}
 
-	if O(ds^, b) != FREE_LEFT_CORNER {return}
+	if O(ds^, b) != FREE_LEFT_CORNER {
+		log.debug("ending zipping - no free left corner", c)
+		return
+	}
 
 	O_(ds, c, b); O_(ds, b, c)
 	a := P(c); V_(ds, P(a), V(ds^, P(b)))
@@ -214,6 +234,8 @@ zip :: proc(ds: ^Decoding_State, em: Encoded_Mesh, c: ct.Corner) {
 	}
 
 	if O(ds^, c) == FREE_RIGHT_CORNER {zip(ds, em, c)}
+
+	log.debug("zip ends")
 }
 
 /******************************* Clarity helpers ******************************/
@@ -249,7 +271,7 @@ corner -> vertex
 */
 @(private = "file")
 V_ :: #force_inline proc(ds: ^Decoding_State, c: ct.Corner, v: ct.Vertex) {
-	for len(ds.t.tris) < int(c) {append(&ds.t.tris, ct.INVALID_VERTEX)}
+	for len(ds.t.tris) <= int(c) {append(&ds.t.tris, ct.INVALID_VERTEX)}
 	ds.t.tris[c] = v
 }
 
@@ -266,7 +288,7 @@ corner -> opposite corner
 */
 @(private = "file")
 O_ :: #force_inline proc(ds: ^Decoding_State, c: ct.Corner, op: ct.Corner) {
-	for len(ds.t.op) < int(c) {append(&ds.t.op, ct.INVALID_CORNER)}
+	for len(ds.t.op) <= int(c) {append(&ds.t.op, ct.INVALID_CORNER)}
 	ds.t.op[c] = op
 }
 
@@ -317,6 +339,10 @@ vertex -> geometry (position in 3D)
 */
 @(private = "file")
 G :: #force_inline proc(ds: Decoding_State, v: ct.Vertex) -> Vec3 {
+	if v == ct.INVALID_VERTEX {
+		log.error("cannot get invalid vertex...", ds, v)
+		return {0, 0, 0}
+	}
 	return ds.t.pos[v]
 }
 
@@ -325,7 +351,7 @@ set geometry of vertex
 */
 @(private = "file")
 G_ :: #force_inline proc(ds: ^Decoding_State, v: ct.Vertex, pos: Vec3) {
-	for len(ds.t.pos) < int(v) {append(&ds.t.pos, {0, 0, 0})}
+	for len(ds.t.pos) <= int(v) {append(&ds.t.pos, {0, 0, 0})}
 	ds.t.pos[v] = pos
 }
 
@@ -425,4 +451,12 @@ position of opposite vertex
 @(private = "file")
 c_o_v_g :: #force_inline proc(ds: Decoding_State, c: ct.Corner) -> Vec3 {
 	return G(ds, V(ds, O(ds, c)))
+}
+
+/*
+triangle of corner
+*/
+@(private = "file")
+T :: #force_inline proc(c: ct.Corner) -> ct.Triangle {
+	return ct.c2t(c)
 }
