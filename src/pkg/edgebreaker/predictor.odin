@@ -1,10 +1,11 @@
 package edgebreaker
 
-import "../corner_table"
+import ct "../corner_table"
+import "core:log"
 
-Vec3 :: corner_table.Vec3
+Vec3 :: ct.Vec3
 
-/********************************* POSSIBLE PREDICTORS ************************/
+/********************************* Possible predictors ************************/
 
 /*
 Given Predictor Kind create a predictor.
@@ -29,7 +30,35 @@ Predictor_Parallelogram :: Predictor {
 	predict = predict_parallelogram,
 }
 
-/**************************** STRUCTS *****************************************/
+/********************** Shared synchronization proc ***************************/
+
+/*
+This proc might be used by both encoder&decoder to assert the correctness of
+input.
+
+Inputs:
+- c: gate corner, in newly discovered triangle
+*/
+predictor_input :: proc(t: ct.Corner_Table, c: ct.Corner) -> Predictor_Input {
+	if c == ct.INVALID_CORNER {
+		log.debug("invalid corner for predictor")
+		return {}
+	}
+	gs := ct.pos(t, ct.next(c))
+	ge := ct.pos(t, ct.prev(c))
+	op_c := ct.op(t, c)
+	op: Vec3
+	if op_c == ct.INVALID_CORNER {
+		log.debug("invalid opposite corner for predictor")
+		op = {0, 0, 0}
+	} else {
+		op = ct.pos(t, op_c)
+	}
+
+	return {gs = gs, ge = ge, op = op}
+}
+
+/**************************** Structs *****************************************/
 
 Predictor_Kind :: enum u8 {
 	NONE,
@@ -49,7 +78,7 @@ Predictor :: struct {
 	predict: Predictor_Proc,
 }
 
-/******************************* IMPLEMENTATIONS ******************************/
+/******************************* Implementations ******************************/
 
 /*
 Always predict {0,0,0} therefore the correction/delta must be the absolute 
