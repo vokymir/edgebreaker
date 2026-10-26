@@ -2,6 +2,7 @@ package edgebreaker
 
 import ct "../corner_table"
 import "base:runtime"
+import "core:log"
 import "core:slice"
 
 // cannot be the papers -1 and -2 because -1 is indicating invalid vertex in CT
@@ -24,16 +25,12 @@ Triangle_Mark :: enum {
 
 @(private = "file")
 Decoding_State :: struct {
-	// all vertices in the first-seen order
-	V:         []ct.Vertex,
-	// oposites
-	O:         []ct.Corner,
 	// current triangle
 	T:         ct.Triangle,
 	// current gate
 	N:         ct.Vertex,
-	// geometry
-	G:         Vec3,
+	// corner table to store V, O, G
+	t:         ^ct.Corner_Table,
 
 	// purely temporal
 
@@ -57,6 +54,7 @@ Decoding_State :: struct {
 init_ds :: proc(
 	ds: ^Decoding_State,
 	em: Encoded_Mesh,
+	t: ^ct.Corner_Table,
 	allocator := context.allocator,
 	loc := #caller_location,
 ) {
@@ -65,10 +63,10 @@ init_ds :: proc(
 
 	ds.allocator = allocator
 
-	ds.V = make([]ct.Vertex, n_vertices, allocator, loc)
-	slice.fill(ds.V[:], ct.INVALID_VERTEX)
-	ds.O = make([]ct.Corner, n_triangles * 3, allocator, loc)
-	slice.fill(ds.O[:], ct.INVALID_CORNER)
+	if t == nil {
+		log.debug("Corner Table passed to Decoding State is nil.")
+	}
+	ds.t = t
 
 	ds.T = ct.INVALID_TRIANGLE
 	ds.N = ct.INVALID_VERTEX
@@ -84,12 +82,13 @@ init_ds :: proc(
 
 @(private = "file")
 destroy_ds :: proc(ds: ^Decoding_State, loc := #caller_location) {
-	delete(ds.V, ds.allocator, loc)
-	delete(ds.O, ds.allocator, loc)
 	delete(ds.M, ds.allocator, loc)
 	delete(ds.U, ds.allocator, loc)
 }
 
+/*
+The corner table should be initialized beforehand.
+*/
 @(private)
 decode_wrap_and_zip_ct :: proc(
 	em: Encoded_Mesh,
@@ -98,14 +97,16 @@ decode_wrap_and_zip_ct :: proc(
 	loc := #caller_location,
 ) -> bool {
 	ds: Decoding_State
-	init_ds(&ds, em, allocator, loc)
+	init_ds(&ds, em, t, allocator, loc)
 	defer destroy_ds(&ds)
 
-	ds.V[0] = 0; ds.V[1] = 1; ds.V[2] = 2
-	ds.O[0] = FREE_LEFT_CORNER; ds.O[2] = FREE_LEFT_CORNER
+	V_(&ds, 0, 0); V_(&ds, 1, 1); V_(&ds, 2, 2)
+	O_(&ds, 0, FREE_LEFT_CORNER); O_(&ds, 2, FREE_LEFT_CORNER)
 
 	ds.T = 0
 	ds.N = 2
+
+	decode_connectivity(&ds, em, 1)
 
 	return true
 }
@@ -116,27 +117,27 @@ decode_connectivity :: proc(ds: ^Decoding_State, em: Encoded_Mesh, c: ct.Corner)
 
 	for {
 		ds.T += 1
-		ds.O[c] = ct.Corner(3 * ds.T); ds.O[3 * ds.T] = c
-		c = ct.next(ds.O[c])
+		O_(ds, c, ct.Corner(3 * ds.T)); O_(ds, ct.Corner(3 * ds.T), c)
+		c = N(O(ds^, c))
 
 		switch read_clers(ds, em) {
 		case .C:
-			ds.O[ct.next(c)] = ct.INVALID_CORNER
+			O_(ds, N(c), ct.INVALID_CORNER)
 			ds.N += 1
-			ds.V[3 * ds.T] = ds.N
+			V_(ds, ct.Corner(3 * ds.T), ds.N)
 		case .L:
-			ds.O[ct.next(c)] = FREE_RIGHT_CORNER
-			zip(ds, em, ct.next(c))
+			O_(ds, N(c), FREE_RIGHT_CORNER)
+			zip(ds, em, N(c))
 		case .R:
-			ds.O[c] = FREE_RIGHT_CORNER
-			c = ct.next(c)
+			O_(ds, c, FREE_RIGHT_CORNER)
+			c = N(c)
 		case .S:
 			decode_connectivity(ds, em, c)
-			c = ct.next(c)
+			c = N(c)
 		case .E:
-			ds.O[c] = FREE_RIGHT_CORNER
-			ds.O[ct.next(c)] = FREE_RIGHT_CORNER
-			zip(ds, em, ct.next(c))
+			O_(ds, c, FREE_RIGHT_CORNER)
+			O_(ds, N(c), FREE_RIGHT_CORNER)
+			zip(ds, em, N(c))
 			return
 		}
 	}
@@ -147,14 +148,14 @@ decode_vertices :: proc(ds: ^Decoding_State, em: Encoded_Mesh, c: ct.Corner) {
 	c := c
 
 	for {
-		ds.U[ct.c2t(c)] = .VISITED
+		U_(ds, ct.Triangle(V(ds^, c)), .VISITED)
 
-		if ds.M[ct.c2t(c)] != .VISITED {
+		if M(ds^, V(ds^, c)) != .VISITED {
 			ds.N += 1
-			ds.G[ds.N] = 0 // TODO: use predictor here with read_delta()
+			G_(ds, ds.N, 0) // TODO: use predictor here with read_delta()
 
-			ds.M[ds.V[c]] = .VISITED
-			c = ds.O[ct.next(c)] // TODO: c.r & c.l clarity helper
+			M_(ds, V(ds^, c), .VISITED)
+			c = R(ds^, c)
 		} else {
 			if ds.U[ct.c2t(ds.O[ct.prev(c)])] == .VISITED {
 				if ds.U[ct.c2t(ds.O[ct.next(c)])] == .VISITED {
@@ -201,6 +202,8 @@ zip :: proc(ds: ^Decoding_State, em: Encoded_Mesh, c: ct.Corner) {
 	if ds.O[c] == FREE_RIGHT_CORNER {zip(ds, em, c)}
 }
 
+/******************************* Clarity helpers ******************************/
+
 // TODO: boundary checks
 @(private = "file")
 read_clers :: #force_inline proc(ds: ^Decoding_State, em: Encoded_Mesh) -> Operation {
@@ -208,4 +211,163 @@ read_clers :: #force_inline proc(ds: ^Decoding_State, em: Encoded_Mesh) -> Opera
 	ds.clers_pos += 1
 
 	return op
+}
+
+
+/*
+corner -> vertex 
+*/
+@(private = "file")
+V :: #force_inline proc(ds: Decoding_State, c: ct.Corner) -> ct.Vertex {
+	return ct.c2v(ds.t^, c)
+}
+
+/*
+corner -> vertex 
+*/
+@(private = "file")
+V_ :: #force_inline proc(ds: ^Decoding_State, c: ct.Corner, v: ct.Vertex) {
+	for len(ds.t.tris) < int(c) {append(&ds.t.tris, ct.INVALID_VERTEX)}
+	ds.t.tris[c] = v
+}
+
+/*
+corner -> opposite corner
+*/
+@(private = "file")
+O :: #force_inline proc(ds: Decoding_State, c: ct.Corner) -> ct.Corner {
+	return ct.op(ds.t^, c)
+}
+
+/*
+corner -> opposite corner
+*/
+@(private = "file")
+O_ :: #force_inline proc(ds: ^Decoding_State, c: ct.Corner, op: ct.Corner) {
+	for len(ds.t.op) < int(c) {append(&ds.t.op, ct.INVALID_CORNER)}
+	ds.t.op[c] = op
+}
+
+/*
+corner -> previous corner in triangle
+*/
+@(private = "file")
+P :: #force_inline proc(c: ct.Corner) -> ct.Corner {
+	return ct.prev(c)
+}
+
+/*
+corner -> next corner in triangle
+*/
+@(private = "file")
+N :: #force_inline proc(c: ct.Corner) -> ct.Corner {
+	return ct.next(c)
+}
+
+/*
+corner c -> corner c.r in right triangle:
+
+      (c.v)
+c.l --- c --- c.r
+ \    /   \    /
+  \  / c.t \  /
+   c.n --- c.p
+    \      /
+     \    /
+      c.o
+*/
+@(private = "file")
+R :: #force_inline proc(ds: Decoding_State, c: ct.Corner) -> ct.Corner {
+	return ct.op(ds.t^, ct.next(c))
+}
+
+/*
+corner c -> corner c.l in left triangle:
+(see R() for image)
+*/
+@(private = "file")
+L :: #force_inline proc(ds: Decoding_State, c: ct.Corner) -> ct.Corner {
+	return ct.op(ds.t^, ct.prev(c))
+}
+
+/*
+vertex -> geometry (position in 3D)
+*/
+@(private = "file")
+G :: #force_inline proc(ds: Decoding_State, v: ct.Vertex) -> Vec3 {
+	return ds.t.pos[v]
+}
+
+/*
+set geometry of vertex
+*/
+@(private = "file")
+G_ :: #force_inline proc(ds: ^Decoding_State, v: ct.Vertex, pos: Vec3) {
+	for len(ds.t.pos) < int(v) {append(&ds.t.pos, {0, 0, 0})}
+	ds.t.pos[v] = pos
+}
+
+/*
+vertex -> mark
+*/
+@(private = "file")
+M :: #force_inline proc(ds: Decoding_State, v: ct.Vertex) -> Vertex_Mark {
+	return ds.M[v]
+}
+
+
+/*
+vertex -> mark
+*/
+@(private = "file")
+M_ :: #force_inline proc(ds: ^Decoding_State, v: ct.Vertex, m: Vertex_Mark) {
+	ds.M[v] = m
+}
+
+/*
+triangle -> mark
+*/
+@(private = "file")
+U :: #force_inline proc(ds: Decoding_State, t: ct.Triangle) -> Triangle_Mark {
+	return ds.U[t]
+}
+
+/*
+triangle -> mark
+*/
+@(private = "file")
+U_ :: #force_inline proc(ds: ^Decoding_State, t: ct.Triangle, m: Triangle_Mark) {
+	ds.U[t] = m
+}
+
+/*
+mark of vertex of corner
+*/
+@(private = "file")
+c_v_m :: #force_inline proc(ds: Decoding_State, c: ct.Corner) -> Vertex_Mark {
+	return M(ds, V(ds, c))
+}
+
+/*
+triangle of corner
+*/
+@(private = "file")
+c_t :: #force_inline proc(ds: Decoding_State, c: ct.Corner) -> ct.Triangle {
+	return ct.Triangle(V(ds, c))
+}
+
+/*
+vertex of corner
+*/
+@(private = "file")
+c_v :: #force_inline proc(ds: Decoding_State, c: ct.Corner) -> ct.Vertex {
+	return V(ds, c)
+}
+
+/*
+right triangle visited
+*/
+@(private = "file")
+c_r_t_u :: #force_inline proc(ds: Decoding_State, c: ct.Corner) -> Triangle_Mark {
+	return U(ds, c_t(ds, R(ds, c)))
 }
