@@ -16,13 +16,13 @@ Represents a triangle mesh in a corner table.
 */
 Corner_Table :: struct {
 	// geometry: coordinates of each vertex
-	pos:  [dynamic]Vec3,
+	pos: [dynamic]Vec3,
 	// every vertex-triplet form one face/triangle
-	tris: [dynamic]Vertex,
+	c2v: [dynamic]Vertex,
 	// opposite corners
-	op:   [dynamic]Corner,
+	op:  [dynamic]Corner,
 	// one (starting) corner for every vertex
-	v2c:  [dynamic]Corner,
+	v2c: [dynamic]Corner,
 }
 
 /*
@@ -35,7 +35,7 @@ Inputs:
  */
 init :: proc(ct: ^Corner_Table, allocator := context.allocator, loc := #caller_location) {
 	ct.pos = make([dynamic]Vec3, allocator, loc)
-	ct.tris = make([dynamic]Vertex, allocator, loc)
+	ct.c2v = make([dynamic]Vertex, allocator, loc)
 	ct.op = make([dynamic]Corner, allocator, loc)
 	ct.v2c = make([dynamic]Corner, allocator, loc)
 }
@@ -49,7 +49,7 @@ Inputs:
 */
 destroy :: proc(ct: ^Corner_Table, loc := #caller_location) {
 	delete(ct.pos, loc)
-	delete(ct.tris, loc)
+	delete(ct.c2v, loc)
 	delete(ct.op, loc)
 	delete(ct.v2c, loc)
 }
@@ -63,7 +63,7 @@ v2c :: #force_inline proc(ct: Corner_Table, v: Vertex) -> Corner {
 
 // return the vertex of this corner
 c2v :: #force_inline proc(ct: Corner_Table, c: Corner) -> Vertex {
-	return ct.tris[c]
+	return ct.c2v[c]
 }
 
 // return index of triangle containing corner c

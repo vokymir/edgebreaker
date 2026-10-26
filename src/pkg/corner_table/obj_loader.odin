@@ -178,7 +178,7 @@ process_face :: proc(
 			return
 		}
 
-		append(&ct.tris, v1, v2, v3)
+		append(&ct.c2v, v1, v2, v3)
 	}
 
 	ok = true
@@ -235,7 +235,7 @@ build_topology :: proc(
 	loc := #caller_location,
 ) {
 	log.debug("start topology build")
-	num_corners := len(ct.tris)
+	num_corners := len(ct.c2v)
 	num_vertices := len(ct.pos)
 
 	resize(&ct.op, num_corners, loc)
@@ -250,9 +250,9 @@ build_topology :: proc(
 	defer delete(edge_map)
 
 	for c in 0 ..< Corner(num_corners) {
-		v := ct.tris[c]
-		v1 := ct.tris[next(c)]
-		v2 := ct.tris[prev(c)]
+		v := ct.c2v[c]
+		v1 := ct.c2v[next(c)]
+		v2 := ct.c2v[prev(c)]
 
 		// simply write-over anything, doesn't matter
 		ct.v2c[v] = c

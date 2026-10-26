@@ -273,8 +273,8 @@ corner -> vertex
 */
 @(private = "file")
 V_ :: #force_inline proc(ds: ^Decoding_State, c: ct.Corner, v: ct.Vertex) {
-	for len(ds.t.tris) <= int(c) {append(&ds.t.tris, ct.INVALID_VERTEX)}
-	ds.t.tris[c] = v
+	for len(ds.t.c2v) <= int(c) {append(&ds.t.c2v, ct.INVALID_VERTEX)}
+	ds.t.c2v[c] = v
 }
 
 /*

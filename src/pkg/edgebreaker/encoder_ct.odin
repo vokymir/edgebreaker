@@ -24,7 +24,7 @@ init_es_ct :: proc(
 	allocator := context.allocator,
 	loc := #caller_location,
 ) {
-	init_es(es, len(t.pos), len(t.tris) / 3, predictor, allocator, loc)
+	init_es(es, len(t.pos), len(t.c2v) / 3, predictor, allocator, loc)
 	// corner-table extra allocations
 }
 
@@ -61,7 +61,7 @@ compress_ct :: proc(
 	defer destroy_es_ct(&es, loc)
 
 	em = new(Encoded_Mesh)
-	init_em(em, len(t.tris) / 3, len(t.pos), &es)
+	init_em(em, len(t.c2v) / 3, len(t.pos), &es)
 
 	mark_all_holes(&es, t)
 
@@ -88,7 +88,7 @@ compress_ct :: proc(
 		index, has_boundary, found = next_component(es, t, index, has_boundary)
 	}
 
-	assert(len(em.symbols) == len(t.tris) / 3, "not one symbol per triangle")
+	assert(len(em.symbols) == len(t.c2v) / 3, "not one symbol per triangle")
 	return true, em
 }
 
@@ -618,10 +618,10 @@ diagnose_mesh :: proc(
 	defer delete(used, allocator, loc)
 
 	// go through all triangles (1 triangle is done after three iterations of i)
-	for i in 0 ..< len(t.tris) {
+	for i in 0 ..< len(t.c2v) {
 		c := ct.Corner(i)
-		used[t.tris[c]] = true
-		count[Edge{t.tris[ct.next(c)], t.tris[ct.prev(c)]}] += 1
+		used[t.c2v[c]] = true
+		count[Edge{t.c2v[ct.next(c)], t.c2v[ct.prev(c)]}] += 1
 	}
 
 	// go through all counted edges
