@@ -3,7 +3,6 @@ package cmd
 import ct "../../pkg/corner_table"
 import eb "../../pkg/edgebreaker"
 import "core:flags"
-import "core:fmt"
 import "core:log"
 import "core:os"
 import "core:path/filepath"
@@ -59,6 +58,16 @@ main :: proc() {
 		if !eb.write(em^, outf) {
 			log.fatal("write failed")
 		}
+
+		/***************************** decode back ********************************/
+
+		decoded_table: ct.Corner_Table
+		ct.init(&decoded_table)
+		defer ct.destroy(&decoded_table)
+
+		eb.decode(em^, &decoded_table)
+
+		ct.save(decoded_table, "decoded.obj")
 	case ".ebk":
 	//decode
 	}
