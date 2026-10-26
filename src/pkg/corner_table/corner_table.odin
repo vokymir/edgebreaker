@@ -78,6 +78,7 @@ pos :: #force_inline proc(ct: Corner_Table, c: Corner) -> Vec3 {
 }
 
 /****************************** Basic Traversal *******************************/
+// TODO: add basic boundary checks against INVALID_CORNER
 
 // returns the next corner in the same triangle (counter-clockwise)
 next :: #force_inline proc(c: Corner) -> Corner {
