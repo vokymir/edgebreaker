@@ -130,12 +130,14 @@ decode_connectivity :: proc(ds: ^Decoding_State, em: Encoded_Mesh, c: ct.Corner)
 	for {
 		ds.T += 1
 		O_(ds, c, ct.Corner(3 * ds.T)); O_(ds, ct.Corner(3 * ds.T), c)
+		V_(ds, ct.Corner(3 * ds.T + 1), V(ds^, P(c)))
+		V_(ds, ct.Corner(3 * ds.T + 2), V(ds^, N(c)))
 		c = N(O(ds^, c))
 
 		switch read_clers(ds, em) {
 		case .C:
 			log.debug("C")
-			O_(ds, N(c), ct.INVALID_CORNER)
+			O_(ds, N(c), FREE_LEFT_CORNER)
 			ds.N += 1
 			V_(ds, ct.Corner(3 * ds.T), ds.N)
 		case .L:
@@ -224,13 +226,13 @@ zip :: proc(ds: ^Decoding_State, em: Encoded_Mesh, c: ct.Corner) {
 	a := P(c); V_(ds, P(a), V(ds^, P(b)))
 
 	for O(ds^, a) >= 0 && b != a {
-		a = O(ds^, P(a))
+		a = P(O(ds^, a))
 		V_(ds, P(a), V(ds^, P(b)))
 	}
 
 	c = P(c)
 	for O(ds^, c) >= 0 && c != b {
-		c = O(ds^, P(c))
+		c = P(O(ds^, c))
 	}
 
 	if O(ds^, c) == FREE_RIGHT_CORNER {zip(ds, em, c)}
@@ -400,8 +402,8 @@ c_v_m :: #force_inline proc(ds: Decoding_State, c: ct.Corner) -> Vertex_Mark {
 triangle of corner
 */
 @(private = "file")
-c_t :: #force_inline proc(ds: Decoding_State, c: ct.Corner) -> ct.Triangle {
-	return ct.Triangle(V(ds, c))
+c_t :: #force_inline proc(c: ct.Corner) -> ct.Triangle {
+	return ct.c2t(c)
 }
 
 /*
@@ -417,7 +419,7 @@ right triangle visited
 */
 @(private = "file")
 c_r_t_u :: #force_inline proc(ds: Decoding_State, c: ct.Corner) -> Triangle_Mark {
-	return U(ds, c_t(ds, R(ds, c)))
+	return U(ds, c_t(R(ds, c)))
 }
 
 /*
@@ -425,7 +427,7 @@ left triangle visited
 */
 @(private = "file")
 c_l_t_u :: #force_inline proc(ds: Decoding_State, c: ct.Corner) -> Triangle_Mark {
-	return U(ds, c_t(ds, L(ds, c)))
+	return U(ds, c_t(L(ds, c)))
 }
 
 
