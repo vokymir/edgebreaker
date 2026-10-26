@@ -157,18 +157,18 @@ decode_vertices :: proc(ds: ^Decoding_State, em: Encoded_Mesh, c: ct.Corner) {
 			M_(ds, V(ds^, c), .VISITED)
 			c = R(ds^, c)
 		} else {
-			if ds.U[ct.c2t(ds.O[ct.prev(c)])] == .VISITED {
-				if ds.U[ct.c2t(ds.O[ct.next(c)])] == .VISITED {
+			if c_r_t_u(ds^, c) == .VISITED {
+				if c_l_t_u(ds^, c) == .VISITED {
 					return
 				} else {
-					c = ds.O[ct.prev(c)]
+					c = L(ds^, c)
 				}
 			} else {
-				if ds.U[ct.c2t(ds.O[ct.next(c)])] == .VISITED {
-					c = ds.O[ct.next(c)]
+				if c_l_t_u(ds^, c) == .VISITED {
+					c = R(ds^, c)
 				} else {
-					decode_vertices(ds, em, ds.O[ct.next(c)])
-					c = ds.O[ct.prev(c)]
+					decode_vertices(ds, em, R(ds^, c))
+					c = L(ds^, c)
 				}
 			}
 		}
@@ -178,28 +178,28 @@ decode_vertices :: proc(ds: ^Decoding_State, em: Encoded_Mesh, c: ct.Corner) {
 @(private = "file")
 zip :: proc(ds: ^Decoding_State, em: Encoded_Mesh, c: ct.Corner) {
 	c := c
-	b := ct.next(c)
+	b := N(c)
 
-	for ds.O[b] >= 0 {
-		b = ct.next(ds.O[b])
+	for O(ds^, b) >= 0 {
+		b = N(O(ds^, b))
 	}
 
-	if ds.O[b] != FREE_LEFT_CORNER {return}
+	if O(ds^, b) != FREE_LEFT_CORNER {return}
 
-	ds.O[c] = b; ds.O[b] = c
-	a := ct.prev(c); ds.V[ct.prev(a)] = ds.V[ct.prev(b)]
+	O_(ds, c, b); O_(ds, b, c)
+	a := P(c); V_(ds, P(a), V(ds^, P(b)))
 
-	for ds.O[a] >= 0 && b != a {
-		a = ds.O[ct.prev(a)]
-		ds.V[ct.prev(a)] = ds.V[ct.prev(b)]
+	for O(ds^, a) >= 0 && b != a {
+		a = O(ds^, P(a))
+		V_(ds, P(a), V(ds^, P(b)))
 	}
 
-	c = ct.prev(c)
-	for ds.O[c] >= 0 && c != b {
-		c = ds.O[ct.prev(c)]
+	c = P(c)
+	for O(ds^, c) >= 0 && c != b {
+		c = O(ds^, P(c))
 	}
 
-	if ds.O[c] == FREE_RIGHT_CORNER {zip(ds, em, c)}
+	if O(ds^, c) == FREE_RIGHT_CORNER {zip(ds, em, c)}
 }
 
 /******************************* Clarity helpers ******************************/
@@ -370,4 +370,12 @@ right triangle visited
 @(private = "file")
 c_r_t_u :: #force_inline proc(ds: Decoding_State, c: ct.Corner) -> Triangle_Mark {
 	return U(ds, c_t(ds, R(ds, c)))
+}
+
+/*
+left triangle visited
+*/
+@(private = "file")
+c_l_t_u :: #force_inline proc(ds: Decoding_State, c: ct.Corner) -> Triangle_Mark {
+	return U(ds, c_t(ds, L(ds, c)))
 }
