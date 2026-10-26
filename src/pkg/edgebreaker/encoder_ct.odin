@@ -171,11 +171,7 @@ C :: proc(es: ^Encoder_State_CT, t: ct.Corner_Table, gate: ct.Corner) -> ct.Corn
 		ge_pos := ct.pos(t, ct.prev(gate))
 		o_pos := ct.pos(t, ct.op(t, gate))
 
-		pred_input := Predictor_Input {
-			gs = gs_pos,
-			ge = ge_pos,
-			op = o_pos,
-		}
+		pred_input := predictor_input(t, gate)
 		prediction := es.predictor.predict(pred_input)
 		correction := ct.pos(t, gate) - prediction
 
