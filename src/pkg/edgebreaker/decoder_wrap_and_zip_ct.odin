@@ -95,7 +95,7 @@ decode_wrap_and_zip_ct :: proc(
 	t: ^ct.Corner_Table,
 	allocator := context.allocator,
 	loc := #caller_location,
-) -> bool {
+) {
 	ds: Decoding_State
 	init_ds(&ds, em, t, allocator, loc)
 	defer destroy_ds(&ds)
@@ -108,7 +108,17 @@ decode_wrap_and_zip_ct :: proc(
 
 	decode_connectivity(&ds, em, 1)
 
-	return true
+	G_(&ds, 0, read_delta(&ds, em))
+	G_(&ds, 1, read_delta(&ds, em))
+	G_(&ds, 2, read_delta(&ds, em))
+	// G_(&ds, 1, G(ds, 0) + read_delta(&ds, em))
+	// G_(&ds, 2, G(ds, 1) + read_delta(&ds, em))
+
+	ds.N = 2
+	M_(&ds, 0, .VISITED); M_(&ds, 1, .VISITED); M_(&ds, 2, .VISITED)
+	U_(&ds, 0, .VISITED)
+
+	decode_vertices(&ds, em, O(ds, 1))
 }
 
 @(private = "file")
@@ -152,7 +162,11 @@ decode_vertices :: proc(ds: ^Decoding_State, em: Encoded_Mesh, c: ct.Corner) {
 
 		if M(ds^, V(ds^, c)) != .VISITED {
 			ds.N += 1
-			G_(ds, ds.N, 0) // TODO: use predictor here with read_delta()
+			prediction := predictor_of(em.predictor).predict(
+			{c_p_v_g(ds^, c), c_n_v_g(ds^, c), c_o_v_g(ds^, c)},
+			)
+			correction := read_delta(ds, em)
+			G_(ds, ds.N, prediction + correction)
 
 			M_(ds, V(ds^, c), .VISITED)
 			c = R(ds^, c)
@@ -213,6 +227,14 @@ read_clers :: #force_inline proc(ds: ^Decoding_State, em: Encoded_Mesh) -> Opera
 	return op
 }
 
+// TODO: boundary checks
+@(private = "file")
+read_delta :: #force_inline proc(ds: ^Decoding_State, em: Encoded_Mesh) -> Vec3 {
+	delta := em.vertices[ds.delta_pos]
+	ds.delta_pos += 1
+
+	return delta
+}
 
 /*
 corner -> vertex 
@@ -378,4 +400,29 @@ left triangle visited
 @(private = "file")
 c_l_t_u :: #force_inline proc(ds: Decoding_State, c: ct.Corner) -> Triangle_Mark {
 	return U(ds, c_t(ds, L(ds, c)))
+}
+
+
+/*
+position of previous vertex
+*/
+@(private = "file")
+c_p_v_g :: #force_inline proc(ds: Decoding_State, c: ct.Corner) -> Vec3 {
+	return G(ds, V(ds, P(c)))
+}
+
+/*
+position of next vertex
+*/
+@(private = "file")
+c_n_v_g :: #force_inline proc(ds: Decoding_State, c: ct.Corner) -> Vec3 {
+	return G(ds, V(ds, N(c)))
+}
+
+/*
+position of opposite vertex
+*/
+@(private = "file")
+c_o_v_g :: #force_inline proc(ds: Decoding_State, c: ct.Corner) -> Vec3 {
+	return G(ds, V(ds, O(ds, c)))
 }
