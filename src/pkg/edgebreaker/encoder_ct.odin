@@ -128,6 +128,7 @@ compress_component :: proc(es: ^Encoder_State_CT, t: ct.Corner_Table, gate: ct.C
 		case:
 			gate = S(es, t, gate, step)
 		}
+		es.first_in_component = false
 	}
 }
 
@@ -178,7 +179,6 @@ C :: proc(es: ^Encoder_State_CT, t: ct.Corner_Table, gate: ct.Corner) -> ct.Corn
 		emit_vertex(es, correction)
 	} else { 	// initial triangle must emit absolute position
 		emit_vertex(es, ct.pos(t, gate))
-		es.first_in_component = false
 	}
 
 	mark(es, t, gate, .VISITED)
