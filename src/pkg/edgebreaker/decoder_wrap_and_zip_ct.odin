@@ -121,8 +121,8 @@ decode_connectivity :: proc(ds: ^Decoder_State, c: ct.Corner) {
 	for {
 		c = attach_triangle(ds, c)
 
-		right_edge, left_edge := c, next(c)
-		tip := prev(c)
+		tip := c
+		right_edge, left_edge := next(c), prev(c)
 
 		switch read_symbol(ds) {
 		case .C:
@@ -156,7 +156,7 @@ attach_triangle :: proc(ds: ^Decoder_State, c: ct.Corner) -> ct.Corner {
 	t.c2v[tip + 1] = ct.c2v(t^, prev(c))
 	t.c2v[tip + 2] = ct.c2v(t^, next(c))
 
-	return next(tip)
+	return tip
 }
 
 zip :: proc(ds: ^Decoder_State, c: ct.Corner) {
