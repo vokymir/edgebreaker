@@ -109,6 +109,7 @@ begin_component :: proc(ds: ^Decoder_State, comp: Component_Info) -> ct.Corner {
 	ds.t.c2v[base + 2] = new_vertex_id(ds) // ge
 	ds.t.c2v[base + 0] = new_vertex_id(ds) // tip
 
+	// TODO: shouldn't the initial "gate" get FREE_RIGHT???
 	ds.t.op[base + 0] = FREE_LEFT
 	ds.t.op[base + 2] = FREE_LEFT
 	return base + 1
@@ -128,9 +129,11 @@ decode_connectivity :: proc(ds: ^Decoder_State, c: ct.Corner) {
 		case .C:
 			t.op[left_edge] = FREE_LEFT
 			t.c2v[tip] = new_vertex_id(ds)
+			c = right_edge
 		case .L:
 			t.op[left_edge] = FREE_RIGHT
 			zip(ds, left_edge)
+			c = right_edge
 		case .R:
 			t.op[right_edge] = FREE_RIGHT
 			c = left_edge
