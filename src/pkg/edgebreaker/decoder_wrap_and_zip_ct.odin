@@ -27,6 +27,8 @@ Decoder_State :: struct {
 	sym_pos:     int,
 	last_tri:    ct.Triangle,
 	last_vertex: ct.Vertex,
+	holes:       map[int]int, // map tip corner -> hole len
+	glues:       map[int]int, // map corner -> corner (arrival to S-left)
 
 	// geometry pass
 	vtx_pos:     int,
@@ -66,6 +68,19 @@ init_ds :: proc(
 		vtx_pos     = 0,
 		vertex_done = make([]bool, n_vertices, allocator, loc),
 		tri_done    = make([]bool, n_triangles, allocator, loc),
+	}
+
+	ds.holes = make(map[int]int, allocator, loc)
+	ds.glues = make(map[int]int, allocator, loc)
+	for top in em.topology {
+		arrival_corner := top.arrival_step * 3 + int(top.arrival_side)
+		s_corner := top.s_step + 2 // always left side
+		ds.glues[arrival_corner] = s_corner
+
+		if top.hole_len < 1 {continue}
+		tip_corner := top.s_step * 3
+		hole := top.hole_len
+		ds.holes[tip_corner] = hole
 	}
 }
 
@@ -145,6 +160,8 @@ decode_connectivity :: proc(ds: ^Decoder_State, c: ct.Corner) {
 		tip := c
 		right_edge, left_edge := next(c), prev(c)
 
+		glue(ds, tip)
+
 		switch read_symbol(ds) {
 		case .C:
 			t.op[left_edge] = FREE_LEFT
@@ -191,6 +208,39 @@ attach_triangle :: proc(ds: ^Decoder_State, c: ct.Corner) -> ct.Corner {
 	}
 
 	return tip
+}
+
+glue :: proc(ds: ^Decoder_State, tip: ct.Corner) {
+	tip: int = int(tip)
+	t := ds.t
+
+	// HOLES
+	if len, ok := ds.holes[tip]; ok {
+		for i in 0 ..< len {new_vertex_id(ds)}
+		delete_key(&ds.holes, tip)
+	}
+
+	// GLUING CORNERS
+	candidates := [3]int{tip, tip + 1, tip + 2}
+
+	gluing_edge := ct.INVALID_CORNER
+
+	for candidate in candidates {
+		if candidate in ds.glues {gluing_edge = ct.Corner(candidate); break}
+	}
+
+	if gluing_edge == ct.INVALID_CORNER {return}
+
+	s := ds.glues[int(gluing_edge)]
+	s_corner := ct.Corner(s)
+
+	t.op[gluing_edge] = ct.Corner(s_corner)
+	t.op[s_corner] = ct.Corner(gluing_edge)
+
+	t.c2v[gluing_edge + 1] = ct.c2v(t^, prev(s_corner))
+	t.c2v[gluing_edge + 2] = ct.c2v(t^, next(s_corner))
+
+	zip(ds, ct.Corner(gluing_edge))
 }
 
 zip :: proc(ds: ^Decoder_State, c: ct.Corner) {
