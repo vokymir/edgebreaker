@@ -3,6 +3,7 @@ package edgebreaker
 
 import ct "../corner_table"
 import "base:runtime"
+import "core:log"
 import "core:slice"
 
 next :: ct.next
@@ -18,6 +19,9 @@ Decoder_State :: struct {
 	vertices:    []Vector3,
 	predictor:   Vertex_Codec,
 	allocator:   runtime.Allocator,
+
+	//
+	gate_stack:  [dynamic]Gate,
 
 	// connectivity pass
 	sym_pos:     int,
@@ -52,8 +56,14 @@ init_ds :: proc(
 		vertices    = em.vertices[:],
 		predictor   = vertex_codec_of(em.vertex_codec),
 		allocator   = allocator,
+		//
+		gate_stack  = make([dynamic]Gate, allocator, loc),
+		//
+		sym_pos     = 0,
 		last_tri    = ct.INVALID_TRIANGLE,
 		last_vertex = ct.INVALID_VERTEX,
+		//
+		vtx_pos     = 0,
 		vertex_done = make([]bool, n_vertices, allocator, loc),
 		tri_done    = make([]bool, n_triangles, allocator, loc),
 	}
@@ -62,6 +72,7 @@ init_ds :: proc(
 destroy_ds :: proc(ds: ^Decoder_State, loc := #caller_location) {
 	delete(ds.vertex_done, ds.allocator, loc)
 	delete(ds.tri_done, ds.allocator, loc)
+	delete(ds.gate_stack, loc)
 }
 
 @(private)
@@ -81,6 +92,7 @@ decode_wrap_and_zip_ct :: proc(
 
 	// pass 1: connectivity
 	for comp in em.components {
+		log.debug("component", comp)
 		start := begin_component(&ds, comp)
 		append(&starts, start)
 		decode_connectivity(&ds, start)
@@ -96,26 +108,34 @@ decode_wrap_and_zip_ct :: proc(
 }
 
 begin_component :: proc(ds: ^Decoder_State, comp: Component_Info) -> ct.Corner {
-	if comp.outer_boundary != 0 {
-		panic("TODO: components with boundary")
+	log.debug("begin component", comp)
+	this_tri := ds.last_tri + 1
+	base := ct.Corner(3 * this_tri)
+
+	if comp.outer_boundary != 0 { 	// BOUNDARY COMPONENT
+		// reserve boundary vertices
+		log.debug("boundary component")
+
+		ds.t.c2v[base + 2] = new_vertex_id(ds)
+		// minus 2: the ge and gs
+		for i in 0 ..< (comp.outer_boundary - 2) {new_vertex_id(ds)}
+		ds.t.c2v[base + 1] = new_vertex_id(ds)
+
+	} else { 	// CLOSED COMPONENT
+		log.debug("closed component")
+
+		ds.t.c2v[base + 1] = new_vertex_id(ds) // gs
+		ds.t.c2v[base + 2] = new_vertex_id(ds) // ge
+
+		ds.t.op[base + 0] = FREE_LEFT
+		ds.t.op[base + 2] = FREE_LEFT
 	}
-	assert(read_symbol(ds) == .C, "first triangle in closed component must be C")
 
-	ds.last_tri += 1
-	base := ct.Corner(3 * ds.last_tri)
-
-	// TODO: initial triangle ordering
-	ds.t.c2v[base + 1] = new_vertex_id(ds) // gs
-	ds.t.c2v[base + 2] = new_vertex_id(ds) // ge
-	ds.t.c2v[base + 0] = new_vertex_id(ds) // tip
-
-	// TODO: shouldn't the initial "gate" get FREE_RIGHT???
-	ds.t.op[base + 0] = FREE_LEFT
-	ds.t.op[base + 2] = FREE_LEFT
-	return base + 1
+	return -1 * base
 }
 
 decode_connectivity :: proc(ds: ^Decoder_State, c: ct.Corner) {
+	log.debug("decode connectivity", c)
 	t := ds.t
 	c := c
 
@@ -138,31 +158,43 @@ decode_connectivity :: proc(ds: ^Decoder_State, c: ct.Corner) {
 			t.op[right_edge] = FREE_RIGHT
 			c = left_edge
 		case .S:
-			decode_connectivity(ds, right_edge)
-			c = left_edge
+			push_gate(ds, left_edge)
+			c = right_edge
 		case .E:
 			t.op[right_edge] = FREE_RIGHT
 			t.op[left_edge] = FREE_RIGHT
 			zip(ds, left_edge)
-			return
+			c = pop_unvisited(ds)
+			if c == ct.INVALID_CORNER {return}
 		}
 	}
 }
 
 attach_triangle :: proc(ds: ^Decoder_State, c: ct.Corner) -> ct.Corner {
+	log.debug("attach triangle")
+	c := c
 	t := ds.t
 	ds.last_tri += 1
 	tip := ct.Corner(3 * ds.last_tri)
 
-	t.op[c], t.op[tip] = tip, c
+	if c > 0 { 	// standard situation
+		log.debug("standard")
+		t.op[c], t.op[tip] = tip, c
 
-	t.c2v[tip + 1] = ct.c2v(t^, prev(c))
-	t.c2v[tip + 2] = ct.c2v(t^, next(c))
+		t.c2v[tip + 1] = ct.c2v(t^, prev(c))
+		t.c2v[tip + 2] = ct.c2v(t^, next(c))
+
+		// in initial triangle, nothing is to do
+	} else { 	// initial triangle
+		log.debug("initial")
+		c *= -1
+	}
 
 	return tip
 }
 
 zip :: proc(ds: ^Decoder_State, c: ct.Corner) {
+	log.debug("zip")
 	t := ds.t
 	c := c
 
@@ -175,10 +207,14 @@ zip :: proc(ds: ^Decoder_State, c: ct.Corner) {
 
 		// all corners around this vertex must reference this vertex now
 		a := prev(c)
+		log.debug("1.1")
 		t.c2v[prev(a)] = ct.c2v(t^, prev(b))
+		log.debug("1.2")
 		for is_linked(t.op[a]) && a != b {
 			a = prev(t.op[a])
+			log.debug("2.1")
 			t.c2v[prev(a)] = ct.c2v(t^, prev(b))
+			log.debug("2.2")
 		}
 
 		// return if done, continue with c if we should
@@ -188,13 +224,17 @@ zip :: proc(ds: ^Decoder_State, c: ct.Corner) {
 	}
 }
 
+// TODO: ALL GEOMETRY
 decode_geometry_from :: proc(ds: ^Decoder_State, start: ct.Corner) {
+	log.debug("DGF")
 	t := ds.t
 	base := start - 1
 
 	// TODO: ordering of initial triangle vertices
 	for corner in ([3]ct.Corner{base + 1, base + 2, base}) {
-		v := ct.c2v(t^, corner)
+		log.debug("in")
+		v := ct.c2v(t^, corner) // TODO: HERE IS -1 index
+		log.debug("out")
 		t.pos[v] = read_vertex(ds)
 		ds.vertex_done[v] = true
 	}
@@ -202,6 +242,7 @@ decode_geometry_from :: proc(ds: ^Decoder_State, start: ct.Corner) {
 	decode_geometry(ds, t.op[start])
 }
 
+// TODO: ALL GEOMETRY
 decode_geometry :: proc(ds: ^Decoder_State, c: ct.Corner) {
 	t := ds.t
 	c := c
@@ -211,7 +252,7 @@ decode_geometry :: proc(ds: ^Decoder_State, c: ct.Corner) {
 
 		v := ct.c2v(t^, c)
 		if !ds.vertex_done[v] { 	// C
-			t.pos[v] = ds.predictor.predict(vertex_codec_context(t^, c)) + read_vertex(ds)
+			// t.pos[v] = ds.predictor.predict(vertex_codec_context(t^, c)) + read_vertex(ds)
 			ds.vertex_done[v] = true
 			c = ct.right_of(t^, c)
 			continue
@@ -254,4 +295,29 @@ read_vertex :: proc(ds: ^Decoder_State) -> Vector3 {
 new_vertex_id :: proc(ds: ^Decoder_State) -> ct.Vertex {
 	ds.last_vertex += 1
 	return ds.last_vertex
+}
+
+/*
+Pushes gate to ds.gate_stack.
+*/
+@(private = "file")
+push_gate :: #force_inline proc(ds: ^Decoder_State, gate: ct.Corner) {
+	append(&ds.gate_stack, Gate(gate))
+}
+
+/*
+Pop gate stack until unvisited gate is found.
+*/
+@(private = "file")
+pop_unvisited :: #force_inline proc(ds: ^Decoder_State) -> ct.Corner {
+	for {
+		if len(ds.gate_stack) == 0 {return ct.INVALID_CORNER}
+
+		candidate := pop(&ds.gate_stack)
+
+		already_done := ds.t.op[candidate] >= 0
+		if !already_done {
+			return ct.Corner(candidate)
+		}
+	}
 }
