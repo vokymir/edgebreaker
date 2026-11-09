@@ -19,7 +19,7 @@ Options :: struct {
 	input:     string `args:"pos=0,required" usage:"Input .obj to encode or .ebk file
   to decode."`,
 	output:    string `args:"name=out" usage:"Optional output file path."`,
-	predictor: eb.Predictor_Kind `args:"name=pred" usage:"Optional predictor
+	predictor: eb.Vertex_Codec_Kind `args:"name=pred" usage:"Optional predictor
   selection."`,
 	handler:   Handler_Kind `args:"name=stream" usage:"Select compression format
   (only for compression)."`,
@@ -46,7 +46,7 @@ main :: proc() {
 			os.exit(1)
 		}
 
-		ok, em := eb.compress(table, eb.predictor_of(opt.predictor))
+		ok, em := eb.compress(table, eb.vertex_codec_of(opt.predictor))
 		if !ok {
 			log.fatal("compression failed")
 			os.exit(1)

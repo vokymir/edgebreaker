@@ -20,11 +20,11 @@ Encoder_State_CT :: struct {
 init_es_ct :: proc(
 	es: ^Encoder_State_CT,
 	t: ct.Corner_Table,
-	predictor: Predictor,
+	vertex_codec: Vertex_Codec,
 	allocator := context.allocator,
 	loc := #caller_location,
 ) {
-	init_es(es, len(t.pos), len(t.c2v) / 3, predictor, allocator, loc)
+	init_es(es, len(t.pos), len(t.c2v) / 3, vertex_codec, allocator, loc)
 	// corner-table extra allocations
 }
 
@@ -46,7 +46,7 @@ The caller is responsible for freeing returned em.
 @(private, require_results)
 compress_ct :: proc(
 	t: ct.Corner_Table,
-	predictor := Predictor_None,
+	vertex_codec := Vertex_Codec_Raw,
 	allocator := context.allocator,
 	loc := #caller_location,
 ) -> (
@@ -57,7 +57,7 @@ compress_ct :: proc(
 	assert_nice_mesh(t, allocator, loc)
 
 	es: Encoder_State_CT
-	init_es_ct(&es, t, predictor, allocator, loc)
+	init_es_ct(&es, t, vertex_codec, allocator, loc)
 	defer destroy_es_ct(&es, loc)
 
 	em = new(Encoded_Mesh)
@@ -110,25 +110,44 @@ compress_component :: proc(es: ^Encoder_State_CT, t: ct.Corner_Table, gate: ct.C
 		assert(tri_step_eq(es^, gate, 0), "triangle visited twice")
 		tri_step(es, gate, step + 1)
 
-		right := ct.op(t, ct.next(gate))
-		left := ct.op(t, ct.prev(gate))
-		right_done := right == ct.INVALID_CORNER || es.tri_step[ct.c2t(right)] != 0
-		left_done := left == ct.INVALID_CORNER || es.tri_step[ct.c2t(left)] != 0
-
-		switch {
-		case is_marked(es^, t, gate, .NOT_VISITED):
+		clers := decide_clers(es, t, gate)
+		switch clers {
+		case .C:
 			gate = C(es, t, gate)
-		case right_done && left_done:
+		case .L:
+			right := ct.op(t, ct.next(gate))
+			emit_symbol(es, .L); gate = right
+		case .R:
+			left := ct.op(t, ct.prev(gate))
+			emit_symbol(es, .R); gate = left
+		case .S:
+			gate = S(es, t, gate, step)
+		case .E:
 			emit_symbol(es, .E)
 			gate = pop_unvisited(es)
-		case right_done:
-			emit_symbol(es, .R); gate = left
-		case left_done:
-			emit_symbol(es, .L); gate = right
-		case:
-			gate = S(es, t, gate, step)
 		}
-		es.first_in_component = false
+	}
+}
+
+@(private = "file")
+decide_clers :: proc(es: ^Encoder_State_CT, t: ct.Corner_Table, gate: ct.Corner) -> Operation {
+
+	right := ct.op(t, ct.next(gate))
+	left := ct.op(t, ct.prev(gate))
+	right_done := right == ct.INVALID_CORNER || es.tri_step[ct.c2t(right)] != 0
+	left_done := left == ct.INVALID_CORNER || es.tri_step[ct.c2t(left)] != 0
+
+	switch {
+	case is_marked(es^, t, gate, .NOT_VISITED):
+		return .C
+	case right_done && left_done:
+		return .E
+	case right_done:
+		return .R
+	case left_done:
+		return .L
+	case:
+		return .S
 	}
 }
 
@@ -136,8 +155,6 @@ compress_component :: proc(es: ^Encoder_State_CT, t: ct.Corner_Table, gate: ct.C
 Handle the first triangle:
 1. boundary triangle: mark&emit all border vertices in correct order
 2. closed mesh: mark&emit first two vertices (gs & ge)
-
-set es.first_in_component to true
 */
 @(private = "file") // becuase name might be reused in decoding
 initial_triangle :: proc(es: ^Encoder_State_CT, t: ct.Corner_Table, gate: ct.Corner) {
@@ -145,18 +162,31 @@ initial_triangle :: proc(es: ^Encoder_State_CT, t: ct.Corner_Table, gate: ct.Cor
 	ge := ct.prev(gate)
 
 	hole_len := 0
-	if ct.border_v(t, ct.c2v(t, gs)) { 	// on border
+	on_border := ct.border_v(t, ct.c2v(t, gs))
+
+	if on_border {
+		mark(es, t, ge, .VISITED)
+		ge_pos := ct.pos(t, ge)
+		emit_vertex(es, ge_pos)
+
 		hole_len = visit_hole(es, t, ge)
 
 	} else {
+		// emit the initial triangle geometry in order gs->ge(->tip in C/S)
+
 		mark(es, t, gs, .VISITED)
 		mark(es, t, ge, .VISITED)
-		emit_vertex(es, ct.pos(t, gs))
-		emit_vertex(es, ct.pos(t, ge))
-	}
-	emit_component(es, hole_len)
 
-	es.first_in_component = true
+		gs_pos := ct.pos(t, gs)
+		ge_pos := ct.pos(t, ge)
+
+		emit_vertex(es, gs_pos)
+
+		correction := es.vertex_codec.encode_loop(gs_pos, ge_pos)
+		emit_vertex(es, correction)
+	}
+
+	emit_component(es, hole_len)
 }
 
 /*
@@ -167,20 +197,7 @@ prediction and correction.
 C :: proc(es: ^Encoder_State_CT, t: ct.Corner_Table, gate: ct.Corner) -> ct.Corner {
 	emit_symbol(es, .C)
 
-	if !es.first_in_component {
-		gs_pos := ct.pos(t, ct.next(gate))
-		ge_pos := ct.pos(t, ct.prev(gate))
-		o_pos := ct.pos(t, ct.op(t, gate))
-
-		pred_input := predictor_input(t, gate)
-		prediction := es.predictor.predict(pred_input)
-		correction := ct.pos(t, gate) - prediction
-
-		emit_vertex(es, correction)
-	} else { 	// initial triangle must emit absolute position
-		emit_vertex(es, ct.pos(t, gate))
-	}
-
+	smart_vertex_emit(es, t, gate)
 	mark(es, t, gate, .VISITED)
 
 	right := ct.op(t, ct.next(gate))
@@ -194,8 +211,12 @@ Pushes left gate to gate_stack and returns right gate.
 */
 @(private = "file") // becuase name might be reused in decoding
 S :: proc(es: ^Encoder_State_CT, t: ct.Corner_Table, gate: ct.Corner, step: int) -> ct.Corner {
+	tip_unknown_hole := is_marked(es^, t, gate, .HOLE)
 
-	if is_marked(es^, t, gate, .HOLE) {
+	if tip_unknown_hole {
+		// handle first vertex separately
+		smart_vertex_emit(es, t, gate)
+		mark(es, t, gate, .VISITED)
 
 		hole_count := visit_hole(es, t, gate)
 		if hole_count <= 0 {log.panic("Hole is too short.")}
@@ -288,6 +309,8 @@ mark_all_holes :: proc(es: ^Encoder_State_CT, t: ct.Corner_Table) {
 }
 
 /*
+WARN: it does not handle the first vertex
+
 Mark all vertices in the hole as visited and return number of those vertices =
 length of hole.
 
@@ -299,9 +322,6 @@ visit_hole :: proc(es: ^Encoder_State_CT, t: ct.Corner_Table, gate: ct.Corner) -
 
 	if !ct.border_v(t, ct.c2v(t, gate)) {return 0}
 	log.debug("gate:", gate)
-
-	mark(es, t, gate, .VISITED)
-	emit_vertex(es, ct.pos(t, gate))
 
 	initial := ct.c2v(t, gate)
 	current := gate
@@ -318,12 +338,53 @@ visit_hole :: proc(es: ^Encoder_State_CT, t: ct.Corner_Table, gate: ct.Corner) -
 
 		n += 1
 		mark(es, t, next, .VISITED)
-		emit_vertex(es, ct.pos(t, ct.v2c(t, v)))
+
+		curr_pos := ct.pos(t, current)
+		next_pos := ct.pos(t, next)
+		emit_vertex(es, es.vertex_codec.encode_loop(curr_pos, next_pos))
 
 		current = next
 	}
 
 	return n
+}
+
+/*
+Decides if vertex geometry should be encoded using tip or loop. If initial, use
+tip, else loop.
+
+Most of times it is a standard tip encoding, but for these it requires loop:
+1. initial C
+2. initial S 
+*/
+@(private = "file")
+smart_vertex_emit :: proc(es: ^Encoder_State_CT, t: ct.Corner_Table, gate: ct.Corner) {
+
+	initial := ct.op(t, gate) == ct.INVALID_CORNER
+	v_pos := ct.pos(t, gate)
+
+	if !initial {
+		vc_ctx := vertex_codec_context(t, gate)
+		correction := es.vertex_codec.encode_tip(vc_ctx, v_pos)
+
+		emit_vertex(es, correction)
+	} else {
+		on_border := ct.border_v(t, ct.c2v(t, ct.prev(gate)))
+		prev := ct.INVALID_CORNER
+
+		if on_border { 	// prev was gs
+			prev = ct.next(gate)
+
+		} else { 	// prev was ge
+			prev = ct.prev(gate)
+		}
+
+		prev_pos := ct.pos(t, prev)
+		curr_pos := ct.pos(t, gate)
+
+		correction := es.vertex_codec.encode_loop(prev_pos, curr_pos)
+		emit_vertex(es, correction)
+	}
 }
 
 /******************************* Clarity helpers ******************************/

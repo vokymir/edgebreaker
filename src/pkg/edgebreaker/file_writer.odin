@@ -39,7 +39,7 @@ write_file_simple :: proc(
 	sb := strings.builder_make(allocator, loc)
 	defer strings.builder_destroy(&sb)
 
-	fmt.sbprintln(&sb, "predictor:", em.predictor)
+	fmt.sbprintln(&sb, "predictor:", em.vertex_codec)
 
 	fmt.sbprintln(&sb, "symbols:")
 	for sym in em.symbols {

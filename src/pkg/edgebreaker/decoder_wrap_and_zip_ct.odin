@@ -16,7 +16,7 @@ Decoder_State :: struct {
 	t:           ^ct.Corner_Table,
 	symbols:     []Operation,
 	vertices:    []Vector3,
-	predictor:   Predictor,
+	predictor:   Vertex_Codec,
 	allocator:   runtime.Allocator,
 
 	// connectivity pass
@@ -50,7 +50,7 @@ init_ds :: proc(
 		t           = t,
 		symbols     = em.symbols[:],
 		vertices    = em.vertices[:],
-		predictor   = predictor_of(em.predictor),
+		predictor   = vertex_codec_of(em.vertex_codec),
 		allocator   = allocator,
 		last_tri    = ct.INVALID_TRIANGLE,
 		last_vertex = ct.INVALID_VERTEX,
@@ -211,7 +211,7 @@ decode_geometry :: proc(ds: ^Decoder_State, c: ct.Corner) {
 
 		v := ct.c2v(t^, c)
 		if !ds.vertex_done[v] { 	// C
-			t.pos[v] = ds.predictor.predict(predictor_input(t^, c)) + read_vertex(ds)
+			t.pos[v] = ds.predictor.predict(vertex_codec_context(t^, c)) + read_vertex(ds)
 			ds.vertex_done[v] = true
 			c = ct.right_of(t^, c)
 			continue

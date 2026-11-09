@@ -11,7 +11,6 @@ structure, while these here are univeral for edgebreaker.
 */
 
 Gate :: distinct int
-Vector3 :: [3]f32
 
 /***************************** Enums ******************************************/
 
@@ -52,25 +51,21 @@ Is only used with corner table.
 @(private) // only used in the package
 Encoder_State :: struct {
 	// for destroy
-	allocator:          runtime.Allocator,
+	allocator:     runtime.Allocator,
 
 	// as many as vertices, ordered as in ct.geometry
-	vertex_marks:       []Mark,
+	vertex_marks:  []Mark,
 	// in which step a triangle was discovered (0=never)
-	tri_step:           []int,
+	tri_step:      []int,
 	// store the opposite corner in the same triangle (ie the v corner)
-	gate_stack:         [dynamic]Gate,
+	gate_stack:    [dynamic]Gate,
 	// store S step -> number of hole vertices
-	hole_len_of_s:      map[int]int,
-
-	// flag necessary to handle first triangle
-	first_in_component: bool,
+	hole_len_of_s: map[int]int,
 
 	// predicts position of next vertex
-	predictor:          Predictor,
-
-	// ptr to resulting mesh
-	em:                 ^Encoded_Mesh,
+	vertex_codec:  Vertex_Codec,
+	// ptr to resulting Vertex_Codec
+	em:            ^Encoded_Mesh,
 }
 
 /*
@@ -80,11 +75,11 @@ vertices in the order of appeareance and a list of topology entries.
 By itself this is sufficient to restore the compressed mesh.
 */
 Encoded_Mesh :: struct {
-	predictor:  Predictor_Kind,
-	symbols:    [dynamic]Operation,
-	vertices:   [dynamic]Vector3,
-	topology:   [dynamic]Topology_Entry,
-	components: [dynamic]Component_Info,
+	vertex_codec: Vertex_Codec_Kind,
+	symbols:      [dynamic]Operation,
+	vertices:     [dynamic]Vector3,
+	topology:     [dynamic]Topology_Entry,
+	components:   [dynamic]Component_Info,
 }
 
 
@@ -119,7 +114,7 @@ Initialize Encoder State for Edgebreaker compression with Corner Table.
 init_es :: proc(
 	es: ^Encoder_State,
 	n_vertices, n_triangles: int,
-	predictor := Predictor_None,
+	vertex_codec := Vertex_Codec_Raw,
 	allocator := context.allocator,
 	loc := #caller_location,
 ) {
@@ -132,13 +127,13 @@ init_es :: proc(
 
 	es.hole_len_of_s = make(map[int]int, allocator, loc)
 
-	es.predictor = predictor
+	es.vertex_codec = vertex_codec
 	es.allocator = allocator
 }
 
 /*
 Destroy internals of Encoder State.
-WARN: caller must deallocate predictor (if necessary)
+WARN: caller must deallocate vertex_codec (if necessary)
 */
 @(private) // only used in the package
 destroy_es :: proc(es: ^Encoder_State, loc := #caller_location) {
