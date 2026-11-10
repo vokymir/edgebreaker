@@ -140,5 +140,5 @@ parallelogram_encode :: proc(ctx: Tip_Context, pos: Vector3) -> Vector3 {
 
 @(private = "file")
 parallelogram_decode :: proc(ctx: Tip_Context, residual: Vector3) -> Vector3 {
-	return (ctx.gate_start + ctx.gate_end - ctx.opposite) + residual
+	return (ctx.gate_start + ctx.gate_end - ctx.opposite) - residual
 }
