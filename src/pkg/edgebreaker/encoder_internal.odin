@@ -562,7 +562,6 @@ gate_from_corner :: proc(t: ct.Corner_Table, c: ct.Corner) -> (gate: ct.Corner) 
 }
 
 /*********************************** Asserts **********************************/
-// might be used across encoders eventually
 
 /*
 From the Euler equation for triangles mentined in Lewiner et al. paper in
