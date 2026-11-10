@@ -358,10 +358,11 @@ Most of times it is a standard tip encoding, but for these it requires loop:
 @(private = "file")
 smart_vertex_emit :: proc(es: ^Encoder_State_CT, t: ct.Corner_Table, gate: ct.Corner) {
 
-	initial := ct.op(t, gate) == ct.INVALID_CORNER
+	op := ct.op(t, gate)
+	standard_situation := op != ct.INVALID_CORNER && es.vertex_marks[ct.c2v(t, op)] == .VISITED
 	v_pos := ct.pos(t, gate)
 
-	if !initial {
+	if standard_situation {
 		vc_ctx := vertex_codec_context(t, gate)
 		correction := es.vertex_codec.encode_tip(vc_ctx, v_pos)
 
