@@ -152,16 +152,19 @@ begin_component :: proc(ds: ^Decoder_State, comp: Component_Info) -> (ct.Corner,
 		ds.t.op[base + 2] = FREE_LEFT
 	}
 
-	return -1 * base, first_vertex_id
+	return base, first_vertex_id
 }
 
+/*
+Assumes that it starts the component, ie it inverts the initial c -> -c, so
+attach_triangle() knows.
+*/
 decode_connectivity :: proc(ds: ^Decoder_State, c: ct.Corner) {
 	log.debug("decode connectivity", c)
 	t := ds.t
-	c := c
+	c := -1 * c
 
 	for {
-		if c == ct.INVALID_CORNER {break}
 		c = attach_triangle(ds, c)
 
 		tip := c
@@ -190,6 +193,8 @@ decode_connectivity :: proc(ds: ^Decoder_State, c: ct.Corner) {
 			zip(ds, left_edge)
 			c = pop_unvisited(ds)
 		}
+
+		if c == ct.INVALID_CORNER {break}
 	}
 }
 
