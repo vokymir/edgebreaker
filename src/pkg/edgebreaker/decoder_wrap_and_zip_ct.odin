@@ -120,7 +120,7 @@ decode_wrap_and_zip_ct :: proc(
 		decode_connectivity(&ds, start)
 
 		if comp.outer_boundary > 0 { 	// set border corners to point to its vertices
-			ct.set_border(ds.t, start + 2, first_vertex_id)
+			ct.set_border(ds.t, start + 1, first_vertex_id, comp.outer_boundary)
 		}
 	}
 	assert(ds.sym_pos == len(ds.symbols), "unused symbols")
