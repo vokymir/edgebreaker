@@ -6,6 +6,8 @@ import "core:os"
 import "core:path/filepath"
 import "core:strings"
 
+// TODO: separe file with this public proc, then private file (private to
+// package) with impl.
 write :: proc(
 	em: Encoded_Mesh,
 	filename: string,
@@ -39,7 +41,8 @@ write_file_simple :: proc(
 	sb := strings.builder_make(allocator, loc)
 	defer strings.builder_destroy(&sb)
 
-	fmt.sbprintln(&sb, "predictor:", em.vertex_codec)
+	fmt.sbprintln(&sb, "vertex codec:")
+	fmt.sbprintln(&sb, em.vertex_codec)
 
 	fmt.sbprintln(&sb, "symbols:")
 	for sym in em.symbols {
