@@ -60,7 +60,7 @@ compress_ct :: proc(
 	init_es_ct(&es, t, vertex_codec, allocator, loc)
 	defer destroy_es_ct(&es, loc)
 
-	em = new(Encoded_Mesh)
+	em = new(Encoded_Mesh, allocator, loc)
 	init_em(em, len(t.c2v) / 3, len(t.pos), &es)
 
 	mark_all_holes(&es, t)
@@ -537,6 +537,7 @@ gate_from_corner :: proc(t: ct.Corner_Table, c: ct.Corner) -> (gate: ct.Corner) 
 	ge_on_border := ct.border_v(t, ct.c2v(t, ge))
 	v_on_border := ct.border_v(t, ct.c2v(t, v))
 
+	// TODO: case 2 & 3 looks unreachable???
 	switch {
 	// case 1
 	case gs_on_border && ge_on_border:
@@ -690,7 +691,7 @@ assert_nice_mesh :: proc(
 	allocator := context.allocator,
 	loc := #caller_location,
 ) {
-	r := diagnose_mesh(t)
+	r := diagnose_mesh(t, allocator, loc)
 
 	assert(r.same_dir == 0, "Mesh contains non-orientable faces.", loc)
 
