@@ -75,8 +75,8 @@ init_ds :: proc(
 	ds.holes = make(map[int]int, allocator, loc)
 	ds.glues = make(map[int]int, allocator, loc)
 	for top in em.topology {
-		arrival_corner := top.arrival_step * 3 + int(top.arrival_side)
-		s_corner := top.s_step + 2 // always left side
+		arrival_corner := 3 * top.arrival_step + int(top.arrival_side)
+		s_corner := 3 * top.s_step + 2 // always left side
 		ds.glues[arrival_corner] = s_corner
 
 		if top.hole_len < 1 {continue}
@@ -119,7 +119,9 @@ decode_wrap_and_zip_ct :: proc(
 		}
 	}
 	assert(ds.sym_pos == len(ds.symbols), "unused symbols")
+	for &o in t.op {if o < 0 {o = ct.INVALID_CORNER}}
 
+	log.debug(t)
 	resize(&t.v2c, len(t.pos), loc)
 	for c in 0 ..< len(t.c2v) {t.v2c[t.c2v[c]] = ct.Corner(c)}
 
@@ -173,8 +175,6 @@ decode_connectivity :: proc(ds: ^Decoder_State, c: ct.Corner) {
 		tip := c
 		right_edge, left_edge := next(c), prev(c)
 
-		glue(ds, tip)
-
 		switch read_symbol(ds) {
 		case .C:
 			t.op[left_edge] = FREE_LEFT
@@ -196,6 +196,8 @@ decode_connectivity :: proc(ds: ^Decoder_State, c: ct.Corner) {
 			zip(ds, left_edge)
 			c = pop_unvisited(ds)
 		}
+
+		glue(ds, tip)
 
 		if c == ct.INVALID_CORNER {break}
 	}
@@ -231,45 +233,42 @@ glue :: proc(ds: ^Decoder_State, tip: ct.Corner) {
 	// HOLES on S corner
 	if len, ok := ds.holes[tip]; ok {
 		for i in 0 ..< len {new_vertex_id(ds)}
+		return
 	}
 
 	// GLUING CORNERS - HOLES or HANDLES on arr corner
-	candidates := [3]int{tip, tip + 1, tip + 2}
+	candidates := [2]int{tip + 1, tip + 2}
 
-	gluing_edge := ct.INVALID_CORNER
+	for can in candidates {
+		if !(can in ds.glues) {continue}
+		can_c := ct.Corner(can)
 
-	for candidate in candidates {
-		if candidate in ds.glues {gluing_edge = ct.Corner(candidate); break}
+		s := ds.glues[can]
+		s_corner := ct.Corner(s)
+
+		t.op[can] = s_corner
+		t.op[s_corner] = can_c
+
+		t.c2v[next(can_c)] = ct.c2v(t^, prev(s_corner))
+		t.c2v[prev(can_c)] = ct.c2v(t^, next(s_corner))
+
+		// HOLES on arr corner = assign vertices
+		s_tip := ct.next(s_corner)
+		// traverse the hole and assign vertex indices, always +1
+		initial := ct.c2v(t^, s_tip)
+		current := s_tip
+		for {
+			next, found := ct.next_on_border(ds.t^, current)
+			if !found {log.debug("not found next corner on border"); break}
+
+			// set all corners around this next vertex to has vtx_id in c2v
+			vtx_id := ds.t.c2v[current] + 1
+			ct.set_ring(ds.t, next, vtx_id)
+
+			if ct.c2v(t^, next) == initial {break}
+			current = next
+		}
 	}
-
-	if gluing_edge == ct.INVALID_CORNER {return}
-
-	s := ds.glues[int(gluing_edge)]
-	s_corner := ct.Corner(s)
-
-	t.op[gluing_edge] = ct.Corner(s_corner)
-	t.op[s_corner] = ct.Corner(gluing_edge)
-
-	t.c2v[gluing_edge + 1] = ct.c2v(t^, prev(s_corner))
-	t.c2v[gluing_edge + 2] = ct.c2v(t^, next(s_corner))
-
-	// HOLES on arr corner = assign vertices
-	s_tip := ct.next(s_corner)
-	// traverse the hole and assign vertex indices, always +1
-	initial := ct.c2v(ds.t^, s_tip)
-	current := s_tip
-	for {
-		next, found := ct.next_on_border(ds.t^, current)
-		if !found {log.error("not found next corner on border")}
-
-		// set all corners around this next vertex to has vtx_id in c2v
-		vtx_id := ds.t.c2v[current] + 1
-		ct.set_ring(ds.t, next, vtx_id)
-
-		current = next
-	}
-
-	zip(ds, ct.Corner(gluing_edge))
 }
 
 zip :: proc(ds: ^Decoder_State, c: ct.Corner) {

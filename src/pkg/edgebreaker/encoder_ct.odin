@@ -254,11 +254,11 @@ check_handles :: proc(es: ^Encoder_State_CT, t: ct.Corner_Table, gate: ct.Corner
 		if es.em.symbols[n_step - 1] != .S {continue}
 
 		// reached an S triangle from the side: this can only be its left edge
-		s_c := 3 * (n_step - 1)
-		arrival := 3 * step
+		s_step := n_step - 1 // TODO: why -1???
+		arrival := step
 		hole_len := es.hole_len_of_s[n_step - 1] // 0 if absent
 
-		emit_topology(es, s_c, arrival, s.side, hole_len)
+		emit_topology(es, s_step, arrival, s.side, hole_len)
 	}
 
 }
