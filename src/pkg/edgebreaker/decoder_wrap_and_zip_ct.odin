@@ -145,7 +145,7 @@ destroy_ds :: proc(ds: ^Decoder_State, loc := #caller_location) {
 	delete(ds.tri_done, ds.allocator, loc)
 }
 
-/******************************************************************************/
+/********************************** ENTRY *************************************/
 
 @(private)
 decode_wrap_and_zip_ct :: proc(
@@ -159,185 +159,262 @@ decode_wrap_and_zip_ct :: proc(
 	defer destroy_ds(&ds, loc)
 
 	// store component starts
-	starts := make([dynamic]ct.Corner, allocator, loc)
-	defer delete(starts)
+	starts := make([dynamic]ct.Corner, 0, len(em.components), allocator, loc)
+	defer delete(starts, loc)
 
 	// pass 1: connectivity
 	for comp in em.components {
-		log.debug("component", comp)
-		start, first_vertex_id := begin_component(&ds, comp)
-		append(&starts, start)
-		decode_connectivity(&ds, start)
-		for h in ds.pending_holes {ct.set_border(ds.t, h.tip, h.first, h.len)}
-		clear(&ds.pending_holes)
-
-		if comp.outer_boundary > 0 { 	// set border corners to point to its vertices
-			ct.set_border(ds.t, start + 1, first_vertex_id, comp.outer_boundary)
-		}
+		append(&starts, decode_component_connectivity(&ds, comp))
 	}
 	assert(ds.sym_pos == len(ds.symbols), "unused symbols")
 	assert(int(ds.last_vertex + 1) == len(em.vertices), "missing vertex")
-	for &o in t.op {if o < 0 {o = ct.INVALID_CORNER}}
 
-	log.debug(t)
-	resize(&t.v2c, len(t.pos), loc)
-	slice.fill(t.v2c[:], ct.INVALID_CORNER)
-	for c in 0 ..< len(t.c2v) {
-		assert(t.c2v[c] != ct.INVALID_VERTEX, "unresolved corner")
-		t.v2c[t.c2v[c]] = ct.Corner(c)
-	}
-	for v in 0 ..< len(t.v2c) {assert(t.v2c[v] != ct.INVALID_CORNER, "unresolved vertex")}
+	finalize_corner_table(&ds, loc)
+	assert_corner_table_consistent(t^)
 
-	log.debug(ds)
 	// pass 2: geometry
-	for start in starts {decode_geometry_from(&ds, start)}
+	for comp, i in em.components {
+		decode_component_geometry(&ds, starts[i], comp)
+	}
 	assert(ds.vtx_pos == len(ds.vertices), "unused vertices")
 }
 
-begin_component :: proc(ds: ^Decoder_State, comp: Component_Info) -> (ct.Corner, ct.Vertex) {
-	log.debug("begin component", comp)
-	this_tri := ds.last_tri + 1
-	base := ct.Corner(3 * this_tri)
+/******************************* PASS 1: CONNECTIVITY *************************/
 
-	first_vertex_id := new_vertex_id(ds)
+/*
+Returns:
+- tip corner of first triangle
+*/
+decode_component_connectivity :: proc(ds: ^Decoder_State, comp: Component_Info) -> ct.Corner {
+	start, first_vertex := begin_component(ds, comp)
 
-	if comp.outer_boundary != 0 { 	// BOUNDARY COMPONENT
-		// reserve boundary vertices
-		log.debug("boundary component")
+	decode_component_triangles(ds, start)
+	finish_component(ds, start, first_vertex, comp)
 
-		ds.t.c2v[base + 1] = first_vertex_id // gs
-		// minus 2: the gs and ge
-		for i in 0 ..< (comp.outer_boundary - 2) {new_vertex_id(ds)}
-		ds.t.c2v[base + 2] = new_vertex_id(ds) // ge
-
-	} else { 	// CLOSED COMPONENT
-		log.debug("closed component")
-
-		ds.t.c2v[base + 1] = first_vertex_id // gs
-		ds.t.c2v[base + 2] = new_vertex_id(ds) // ge
-
-		ds.t.op[base + 0] = FREE_LEFT
-		ds.t.op[base + 2] = FREE_LEFT
-	}
-
-	return base, first_vertex_id
+	return start
 }
 
 /*
-*/
-decode_connectivity :: proc(ds: ^Decoder_State, c: ct.Corner) {
-	log.debug("decode connectivity", c)
-	t := ds.t
-	c := c
-	initial := true
+Reserve vertices for initial triangle and maybe outer boundary.
 
-	// TODO: extract from a proc
-	// mark an edge free only if glue hasn't already linked it
-	set_free :: proc(t: ^ct.Corner_Table, e, mark: ct.Corner) {
-		if !is_linked(t.op[e]) {t.op[e] = mark}
+Returns:
+- start: tip of first triangle
+- first_vertex: id of gs (1st component vertex, absolute position)
+*/
+begin_component :: proc(
+	ds: ^Decoder_State,
+	comp: Component_Info,
+) -> (
+	start: ct.Corner,
+	first_vertex: ct.Vertex,
+) {
+	log.debug("begin component", comp)
+	start = peek_next_tip(ds)
+
+	if comp.outer_boundary > 0 { 	// BOUNDARY COMPONENT
+		first_vertex = begin_boundary_component(ds, start, comp.outer_boundary)
+	} else { 	// CLOSED COMPONENT
+		first_vertex = begin_closed_component(ds, start)
 	}
 
+	return start, first_vertex
+}
+
+/*
+reserve border vertex ids, process gs,ge
+the assigning of vertex ids is done in finish_component
+*/
+begin_boundary_component :: proc(ds: ^Decoder_State, tip: ct.Corner, n_border: int) -> ct.Vertex {
+	first := reserve_vertex_ids(ds, n_border)
+
+	ds.t.c2v[gate_start(tip)] = first
+	ds.t.c2v[gate_end(tip)] = first + ct.Vertex(n_border - 1)
+
+	return first
+}
+
+begin_closed_component :: proc(ds: ^Decoder_State, tip: ct.Corner) -> ct.Vertex {
+	first := reserve_vertex_ids(ds, 2)
+
+	ds.t.c2v[gate_start(tip)] = first
+	ds.t.c2v[gate_end(tip)] = first + 1
+	ds.t.op[tip] = FREE_LEFT
+
+	return first
+}
+
+/*
+Main connectivity loop, iterates over triangles.
+*/
+decode_component_triangles :: proc(ds: ^Decoder_State, start: ct.Corner) {
+	tip := new_triangle(ds) // initial triangle
+	assert(tip == start, "component must start on the next free triangle")
+
 	for {
-		c = attach_triangle(ds, c, initial)
-		initial = false
+		// glue depends on triangle, not the symbol
+		glue_triangle(ds, tip)
 
-		tip := c
-		right_edge, left_edge := next(c), prev(c)
+		symbol := read_symbol(ds)
+		edge := apply_symbol(ds, tip, symbol)
+		if edge == ct.INVALID_CORNER {return} 	// finished component
 
-		glue(ds, tip)
-
-		switch read_symbol(ds) {
-		case .C:
-			t.op[left_edge] = FREE_LEFT
-			t.c2v[tip] = new_vertex_id(ds)
-			c = right_edge
-		case .L:
-			set_free(t, left_edge, FREE_RIGHT)
-			if t.op[left_edge] == FREE_RIGHT {zip(ds, left_edge)}
-			c = right_edge
-		case .R:
-			set_free(t, right_edge, FREE_RIGHT)
-			c = left_edge
-		case .S:
-			push_gate(ds, left_edge)
-			c = right_edge
-		case .E:
-			set_free(t, right_edge, FREE_RIGHT)
-			set_free(t, left_edge, FREE_RIGHT)
-			if t.op[left_edge] == FREE_RIGHT {zip(ds, left_edge)}
-			c = pop_unvisited(ds)
-		}
-		assert(!is_linked(t.op[c]) || c == ct.INVALID_CORNER, "enc/dec mismatch in triangles done")
-
-		if c == ct.INVALID_CORNER {break}
+		assert(!is_linked(ds.t.op[edge]), "enc/dec mismatch: next gate is already linked")
+		tip = attach_triangle(ds, edge)
 	}
 }
 
-attach_triangle :: proc(ds: ^Decoder_State, c: ct.Corner, initial: bool = false) -> ct.Corner {
-	log.debug("attach triangle from corner", c)
-	c := c
+/*
+Create new triangle. It is attached to "edge".
+
+Returns:
+- tip: tip of the new triangle
+*/
+attach_triangle :: proc(ds: ^Decoder_State, edge: ct.Corner) -> (tip: ct.Corner) {
 	t := ds.t
-	ds.last_tri += 1
-	tip := ct.Corner(3 * ds.last_tri)
+	tip = new_triangle(ds)
 
-	if !initial { 	// standard situation
-		log.debug("standard")
-		t.op[c], t.op[tip] = tip, c
+	t.op[edge] = tip
+	t.op[tip] = edge
 
-		t.c2v[tip + 1] = ct.c2v(t^, prev(c))
-		t.c2v[tip + 2] = ct.c2v(t^, next(c))
-
-		// in initial triangle, nothing is to do
-	} else { 	// initial triangle
-		log.debug("initial")
-	}
+	t.c2v[gate_start(tip)] = t.c2v[prev(edge)]
+	t.c2v[gate_end(tip)] = t.c2v[next(edge)]
 
 	return tip
 }
 
-glue :: proc(ds: ^Decoder_State, tip: ct.Corner) {
-	log.debug("try glue for", tip)
-	tip: int = int(tip)
-	t := ds.t
+/********************************* CLERS **************************************/
 
-	// HOLES on S corner
-	if n, ok := ds.holes[tip]; ok {
-		log.debug("hole on S corner")
-		first := new_vertex_id(ds)
-		for i in 0 ..< (n - 1) {new_vertex_id(ds)} 	// -1 for the first
-		t.c2v[tip] = first
-		append(&ds.pending_holes, Pending_Hole{ct.Corner(tip), first, n})
+/*
+Returns:
+- edge: corner which the next triangle should be attached to
+  INVALID_CORNER = component is finished
+*/
+apply_symbol :: proc(ds: ^Decoder_State, tip: ct.Corner, symbol: Operation) -> (edge: ct.Corner) {
+	switch symbol {
+	case .C:
+		edge = apply_C(ds, tip)
+	case .L:
+		edge = apply_L(ds, tip)
+	case .R:
+		edge = apply_R(ds, tip)
+	case .S:
+		edge = apply_S(ds, tip)
+	case .E:
+		edge = apply_E(ds, tip)
 	}
-
-	// GLUING CORNERS - HOLES or HANDLES on arr corner
-	log.debug("try gluing corner - hole or handle")
-
-	for side in 1 ..= 2 {
-		corner := ct.Corner(int(tip) + side)
-		s, ok := ds.glues[int(corner)]
-		if !ok {continue}
-		log.debug("gluing on corner", corner)
-		s_corner := ct.Corner(s)
-
-		log.debug("prev")
-		t.op[corner] = s_corner
-		t.op[s_corner] = corner
-		log.debug("post")
-
-		join_vertex(t, next(corner), prev(s_corner))
-		join_vertex(t, prev(corner), next(s_corner))
-	}
-
-	log.debug("end try-glue")
+	return edge
 }
 
-join_vertex :: proc(t: ^ct.Corner_Table, a, b: ct.Corner) {
+// new vertex, left is open, return right
+apply_C :: proc(ds: ^Decoder_State, tip: ct.Corner) -> ct.Corner {
+	set_free(ds.t, left_edge(tip), FREE_LEFT)
+	ds.t.c2v[tip] = new_vertex_id(ds)
+	return right_edge(tip)
+}
+// left triangle already exists, close it (zip), continue right
+apply_L :: proc(ds: ^Decoder_State, tip: ct.Corner) -> ct.Corner {
+	set_free(ds.t, left_edge(tip), FREE_RIGHT)
+	zip_if_free_right(ds, left_edge(tip))
+	return right_edge(tip)
+}
+// right triangle already exists, continue left
+apply_R :: proc(ds: ^Decoder_State, tip: ct.Corner) -> ct.Corner {
+	set_free(ds.t, right_edge(tip), FREE_RIGHT)
+	return left_edge(tip)
+}
+// split: push left, return right
+apply_S :: proc(ds: ^Decoder_State, tip: ct.Corner) -> ct.Corner {
+	push_gate(ds, left_edge(tip))
+	return right_edge(tip)
+}
+// end: close sides, zip, pop gate_stack
+apply_E :: proc(ds: ^Decoder_State, tip: ct.Corner) -> ct.Corner {
+	set_free(ds.t, right_edge(tip), FREE_RIGHT)
+	set_free(ds.t, left_edge(tip), FREE_RIGHT)
+	zip_if_free_right(ds, left_edge(tip))
+	return pop_unlinked_gate(gs)
+}
+
+/*
+Mark edge as free ONLY if it isn't already linked.
+*/
+set_free :: proc(t: ^ct.Corner_Table, edge, mark: ct.Corner) {
+	if !is_linked(t.op[edge]) {t.op[edge] = mark}
+}
+
+/****************************** HOLES & HANDLES *******************************/
+
+/*
+Check everything:
+a) is a hole? if so, reserve
+b) is arrival? if so, link
+*/
+glue_triangle :: proc(ds: ^Decoder_State, tip: ct.Corner) {
+	reserve_hole_vertices(ds, tip)
+	glue_side(ds, side_corner(tip, .RIGHT))
+	glue_side(ds, side_corner(tip, .LEFT))
+}
+
+/*
+If tip is on hole: reserve vertices (assigned in finish_component)
+*/
+reserve_hole_vertices :: proc(ds: ^Decoder_State, tip: ct.Corner) {
+	n, is_hole := ds.holes[tip]
+	if !is_hole {return}
+
+	first := reserve_vertex_ids(ds, n)
+	ds.t.c2v[tip] = first
+	append(&ds.pending_holes, Pending_Hole{tip = tip, first = first, len = n})
+}
+
+/*
+If corner is arrival corner, link it.
+*/
+glue_side :: proc(ds: ^Decoder_State, corner: ct.Corner) {
+	t := ds.t
+
+	s_left, is_arrival := ds.glues[corner]
+	if !is_arrival {return}
+
+	t.op[corner] = s_left
+	t.op[s_left] = corner
+
+	unify_vertices(t, next(corner), prev(s_left))
+	unify_vertices(t, prev(corner), next(s_left))
+}
+
+/*
+Corners (at least one) were just assigned the same vertex. Give it to the whole
+ring.
+*/
+unify_vertices :: proc(t: ^ct.Corner_Table, a, b: ct.Corner) {
 	va, vb := t.c2v[a], t.c2v[b]
 	if va == ct.INVALID_VERTEX && vb == ct.INVALID_VERTEX {return}
 
-	assert(va == vb || va == ct.INVALID_VERTEX || vb == ct.INVALID_VERTEX)
-	ct.set_ring(t, a, va if va != ct.INVALID_VERTEX else vb)
+	valid_case := va == vb || va == ct.INVALID_VERTEX || vb == ct.INVALID_VERTEX
+	assert(valid_case, "glued corners belong to different vertices")
+
+	known := va if va != ct.INVALID_VERTEX else vb
+	ct.set_ring(t, a, known)
 }
+
+finish_component :: proc(
+	ds: ^Decoder_State,
+	start: ct.Corner,
+	first_vertex: ct.Vertex,
+	comp: Component_Info,
+) {
+	for h in ds.pending_holes {
+		ct.set_border(ds.t, h.tip, h.first, h.len)
+	}
+	clear(&ds.pending_holes)
+
+	if comp.outer_boundary > 0 {
+		ct.set_border(ds.t, gate_start(start), first_vertex, comp.outer_boundary)
+	}
+}
+
+/********************************** ZIP ***************************************/
 
 zip :: proc(ds: ^Decoder_State, c: ct.Corner) {
 	log.debug("zip")
