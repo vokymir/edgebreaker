@@ -6,12 +6,34 @@ import "base:runtime"
 import "core:log"
 import "core:slice"
 
+/******************************* TYPES ****************************************/
+
 next :: ct.next
 prev :: ct.prev
+right_edge :: ct.next
+left_edge :: ct.prev
 
-// must not collide with ct.INVALID_CORNER
+// those assume tip given
+gate_start :: ct.next
+gate_end :: ct.prev
+
+/* 
+Temporary values for connectivity pass.
+Must not collide with ct.INVALID_CORNER.
+*/
 FREE_LEFT :: ct.Corner(-10)
 FREE_RIGHT :: ct.Corner(-20)
+
+/******************************* STRUCTS **************************************/
+
+/*
+Hole already found by S but the vertices not known yet.
+*/
+Pending_Hole :: struct {
+	tip:   ct.Corner, // tip of S triangle
+	first: ct.Vertex, // id of the first (tip) hole vertex
+	len:   int, // #verts in hole
+}
 
 Decoder_State :: struct {
 	t:             ^ct.Corner_Table,
@@ -19,15 +41,17 @@ Decoder_State :: struct {
 	vertices:      []Vector3,
 	allocator:     runtime.Allocator,
 
-	//
+	// lookups prepared from topology
+	holes:         map[ct.Corner]int, // map tip corner -> hole len
+	glues:         map[ct.Corner]ct.Corner, // map corner -> corner (arrival to S-left)
+
+	// both passes
 	gate_stack:    [dynamic]Gate,
 
 	// connectivity pass
 	sym_pos:       int,
 	last_tri:      ct.Triangle,
 	last_vertex:   ct.Vertex,
-	holes:         map[int]int, // map tip corner -> hole len
-	glues:         map[int]int, // map corner -> corner (arrival to S-left)
 	pending_holes: [dynamic]Pending_Hole,
 
 	// geometry pass
@@ -47,22 +71,16 @@ init_ds :: proc(
 	n_triangles := len(em.symbols)
 	n_vertices := len(em.vertices)
 
-	assert(len(t.pos) == 0, "not empty corner table")
-	assert(len(t.c2v) == 0, "not empty corner table")
-	assert(len(t.op) == 0, "not empty corner table")
-	assert(len(t.v2c) == 0, "not empty corner table")
-
-	resize(&t.pos, n_vertices, loc)
-	resize(&t.c2v, 3 * n_triangles, loc)
-	resize(&t.op, 3 * n_triangles, loc)
-	slice.fill(t.c2v[:], ct.INVALID_VERTEX)
-	slice.fill(t.op[:], ct.INVALID_CORNER)
+	prepare_corner_table(t, n_vertices, n_triangles, loc)
 
 	ds^ = Decoder_State {
 		t             = t,
 		symbols       = em.symbols[:],
 		vertices      = em.vertices[:],
 		allocator     = allocator,
+		//
+		holes         = make(map[ct.Corner]int, allocator, loc),
+		glues         = make(map[ct.Corner]ct.Corner, allocator, loc),
 		//
 		gate_stack    = make([dynamic]Gate, allocator, loc),
 		//
@@ -77,33 +95,54 @@ init_ds :: proc(
 		vtx_codec     = vertex_codec_of(em.vertex_codec),
 	}
 
-	ds.holes = make(map[int]int, allocator, loc)
-	ds.glues = make(map[int]int, allocator, loc)
-	for top in em.topology {
-		arrival_corner := 3 * top.arrival_step + int(top.arrival_side)
-		s_corner := 3 * top.s_step + 2 // always left side
+	prepare_topology_lookups(ds, em.topology[:])
+}
+
+/*
+Make some insides of corner table adequately sized.
+*/
+prepare_corner_table :: proc(
+	t: ^ct.Corner_Table,
+	n_vertices, n_triangles: int,
+	loc := #caller_location,
+) {
+	assert(len(t.pos) == 0, "not empty corner table")
+	assert(len(t.c2v) == 0, "not empty corner table")
+	assert(len(t.op) == 0, "not empty corner table")
+	assert(len(t.v2c) == 0, "not empty corner table")
+
+	resize(&t.pos, n_vertices, loc)
+	resize(&t.c2v, 3 * n_triangles, loc)
+	resize(&t.op, 3 * n_triangles, loc)
+	slice.fill(t.c2v[:], ct.INVALID_VERTEX)
+	slice.fill(t.op[:], ct.INVALID_CORNER)
+}
+
+/*
+Transform topology entries into maps for O(1) lookup time.
+*/
+prepare_topology_lookups :: proc(ds: ^Decoder_State, topology: []Topology_Entry) {
+	for top in topology {
+		s_tip := ct.Corner(3 * top.s_step)
+		arrival_tip := ct.Corner(3 * top.arrival_step)
+		s_corner := side_corner(s_tip, .LEFT) // always left side
+		arrival_corner := side_corner(arrival_tip, top.arrival_side)
+
 		ds.glues[arrival_corner] = s_corner
 
-		if top.hole_len < 1 {continue}
-		tip_corner := top.s_step * 3
-		hole := top.hole_len
-		ds.holes[tip_corner] = hole
+		if top.hole_len > 0 {
+			ds.holes[s_tip] = top.hole_len
+		}
 	}
 }
 
 destroy_ds :: proc(ds: ^Decoder_State, loc := #caller_location) {
-	delete(ds.vertex_done, ds.allocator, loc)
-	delete(ds.tri_done, ds.allocator, loc)
-	delete(ds.gate_stack, loc)
 	delete(ds.holes, loc)
 	delete(ds.glues, loc)
+	delete(ds.gate_stack, loc)
 	delete(ds.pending_holes, loc)
-}
-
-Pending_Hole :: struct {
-	tip:   ct.Corner,
-	first: ct.Vertex,
-	len:   int,
+	delete(ds.vertex_done, ds.allocator, loc)
+	delete(ds.tri_done, ds.allocator, loc)
 }
 
 /******************************************************************************/
