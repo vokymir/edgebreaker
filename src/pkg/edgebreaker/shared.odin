@@ -80,7 +80,6 @@ init_em :: proc(
 	em: ^Encoded_Mesh,
 	n_symbols: int = 0,
 	n_vertices: int = 0,
-	es: ^Encoder_State = nil,
 	allocator := context.allocator,
 	loc := #caller_location,
 ) {
@@ -88,10 +87,6 @@ init_em :: proc(
 	em.vertices = make([dynamic]Vector3, 0, n_vertices, allocator, loc)
 	em.topology = make([dynamic]Topology_Entry, 0, 0, allocator, loc)
 	em.components = make([dynamic]Component_Info, 0, 0, allocator, loc)
-
-	if es != nil {
-		es.em = em
-	}
 }
 
 /*
