@@ -14,26 +14,27 @@ FREE_LEFT :: ct.Corner(-10)
 FREE_RIGHT :: ct.Corner(-20)
 
 Decoder_State :: struct {
-	t:           ^ct.Corner_Table,
-	symbols:     []Operation,
-	vertices:    []Vector3,
-	allocator:   runtime.Allocator,
+	t:             ^ct.Corner_Table,
+	symbols:       []Operation,
+	vertices:      []Vector3,
+	allocator:     runtime.Allocator,
 
 	//
-	gate_stack:  [dynamic]Gate,
+	gate_stack:    [dynamic]Gate,
 
 	// connectivity pass
-	sym_pos:     int,
-	last_tri:    ct.Triangle,
-	last_vertex: ct.Vertex,
-	holes:       map[int]int, // map tip corner -> hole len
-	glues:       map[int]int, // map corner -> corner (arrival to S-left)
+	sym_pos:       int,
+	last_tri:      ct.Triangle,
+	last_vertex:   ct.Vertex,
+	holes:         map[int]int, // map tip corner -> hole len
+	glues:         map[int]int, // map corner -> corner (arrival to S-left)
+	pending_holes: [dynamic]Pending_Hole,
 
 	// geometry pass
-	vtx_pos:     int,
-	vertex_done: []bool,
-	tri_done:    []bool,
-	vtx_codec:   Vertex_Codec,
+	vtx_pos:       int,
+	vertex_done:   []bool,
+	tri_done:      []bool,
+	vtx_codec:     Vertex_Codec,
 }
 
 init_ds :: proc(
@@ -58,21 +59,22 @@ init_ds :: proc(
 	slice.fill(t.op[:], ct.INVALID_CORNER)
 
 	ds^ = Decoder_State {
-		t           = t,
-		symbols     = em.symbols[:],
-		vertices    = em.vertices[:],
-		allocator   = allocator,
+		t             = t,
+		symbols       = em.symbols[:],
+		vertices      = em.vertices[:],
+		allocator     = allocator,
 		//
-		gate_stack  = make([dynamic]Gate, allocator, loc),
+		gate_stack    = make([dynamic]Gate, allocator, loc),
 		//
-		sym_pos     = 0,
-		last_tri    = ct.INVALID_TRIANGLE,
-		last_vertex = ct.INVALID_VERTEX,
+		sym_pos       = 0,
+		last_tri      = ct.INVALID_TRIANGLE,
+		last_vertex   = ct.INVALID_VERTEX,
+		pending_holes = make([dynamic]Pending_Hole, allocator, loc),
 		//
-		vtx_pos     = 0,
-		vertex_done = make([]bool, n_vertices, allocator, loc),
-		tri_done    = make([]bool, n_triangles, allocator, loc),
-		vtx_codec   = vertex_codec_of(em.vertex_codec),
+		vtx_pos       = 0,
+		vertex_done   = make([]bool, n_vertices, allocator, loc),
+		tri_done      = make([]bool, n_triangles, allocator, loc),
+		vtx_codec     = vertex_codec_of(em.vertex_codec),
 	}
 
 	ds.holes = make(map[int]int, allocator, loc)
@@ -95,7 +97,16 @@ destroy_ds :: proc(ds: ^Decoder_State, loc := #caller_location) {
 	delete(ds.gate_stack, loc)
 	delete(ds.holes, loc)
 	delete(ds.glues, loc)
+	delete(ds.pending_holes, loc)
 }
+
+Pending_Hole :: struct {
+	tip:   ct.Corner,
+	first: ct.Vertex,
+	len:   int,
+}
+
+/******************************************************************************/
 
 @(private)
 decode_wrap_and_zip_ct :: proc(
@@ -118,6 +129,8 @@ decode_wrap_and_zip_ct :: proc(
 		start, first_vertex_id := begin_component(&ds, comp)
 		append(&starts, start)
 		decode_connectivity(&ds, start)
+		for h in ds.pending_holes {ct.set_border(ds.t, h.tip, h.first, h.len)}
+		clear(&ds.pending_holes)
 
 		if comp.outer_boundary > 0 { 	// set border corners to point to its vertices
 			ct.set_border(ds.t, start + 1, first_vertex_id, comp.outer_boundary)
@@ -237,55 +250,47 @@ attach_triangle :: proc(ds: ^Decoder_State, c: ct.Corner, initial: bool = false)
 }
 
 glue :: proc(ds: ^Decoder_State, tip: ct.Corner) {
-	log.debug("glue for", tip)
+	log.debug("try glue for", tip)
 	tip: int = int(tip)
 	t := ds.t
 
 	// HOLES on S corner
-	if len, ok := ds.holes[tip]; ok {
+	if n, ok := ds.holes[tip]; ok {
 		log.debug("hole on S corner")
-		for i in 0 ..< len {new_vertex_id(ds)}
-		return
+		first := new_vertex_id(ds)
+		for i in 0 ..< (n - 1) {new_vertex_id(ds)} 	// -1 for the first
+		t.c2v[tip] = first
+		append(&ds.pending_holes, Pending_Hole{ct.Corner(tip), first, n})
 	}
 
 	// GLUING CORNERS - HOLES or HANDLES on arr corner
-	log.debug("gluing corner - hole or handle")
-	candidates := [2]int{tip + 1, tip + 2}
+	log.debug("try gluing corner - hole or handle")
 
-	for can in candidates {
-		if !(can in ds.glues) {continue}
-		log.debug("gluing on corner", can)
-		can_c := ct.Corner(can)
-
-		s := ds.glues[can]
+	for side in 1 ..= 2 {
+		corner := ct.Corner(int(tip) + side)
+		s, ok := ds.glues[int(corner)]
+		if !ok {continue}
+		log.debug("gluing on corner", corner)
 		s_corner := ct.Corner(s)
 
 		log.debug("prev")
-		t.op[can] = s_corner
-		t.op[s_corner] = can_c
+		t.op[corner] = s_corner
+		t.op[s_corner] = corner
 		log.debug("post")
 
-		t.c2v[next(can_c)] = ct.c2v(t^, prev(s_corner))
-		t.c2v[prev(can_c)] = ct.c2v(t^, next(s_corner))
-
-		// HOLES on arr corner = assign vertices
-		s_tip := ct.next(s_corner)
-		// traverse the hole and assign vertex indices, always +1
-		initial := ct.c2v(t^, s_tip)
-		current := s_tip
-		log.debug("hole vertex assigning")
-		for {
-			next, found := ct.next_on_border(ds.t^, current)
-			if !found {log.debug("not found next corner on border"); break}
-
-			// set all corners around this next vertex to has vtx_id in c2v
-			vtx_id := ds.t.c2v[current] + 1
-			ct.set_ring(ds.t, next, vtx_id)
-
-			if ct.c2v(t^, next) == initial {break}
-			current = next
-		}
+		join_vertex(t, next(corner), prev(s_corner))
+		join_vertex(t, prev(corner), next(s_corner))
 	}
+
+	log.debug("end try-glue")
+}
+
+join_vertex :: proc(t: ^ct.Corner_Table, a, b: ct.Corner) {
+	va, vb := t.c2v[a], t.c2v[b]
+	if va == ct.INVALID_VERTEX && vb == ct.INVALID_VERTEX {return}
+
+	assert(va == vb || va == ct.INVALID_VERTEX || vb == ct.INVALID_VERTEX)
+	ct.set_ring(t, a, va if va != ct.INVALID_VERTEX else vb)
 }
 
 zip :: proc(ds: ^Decoder_State, c: ct.Corner) {
