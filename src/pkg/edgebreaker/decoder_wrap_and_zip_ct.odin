@@ -209,7 +209,7 @@ begin_component :: proc(
 	first_vertex: ct.Vertex,
 ) {
 	log.debug("begin component", comp)
-	start = peek_next_tip(ds)
+	start = peek_next_tip(ds^)
 
 	if comp.outer_boundary > 0 { 	// BOUNDARY COMPONENT
 		first_vertex = begin_boundary_component(ds, start, comp.outer_boundary)
@@ -308,7 +308,7 @@ apply_symbol :: proc(ds: ^Decoder_State, tip: ct.Corner, symbol: Operation) -> (
 // new vertex, left is open, return right
 apply_C :: proc(ds: ^Decoder_State, tip: ct.Corner) -> ct.Corner {
 	set_free(ds.t, left_edge(tip), FREE_LEFT)
-	ds.t.c2v[tip] = new_vertex_id(ds)
+	ds.t.c2v[tip] = reserve_vertex_id(ds)
 	return right_edge(tip)
 }
 // left triangle already exists, close it (zip), continue right
@@ -332,7 +332,7 @@ apply_E :: proc(ds: ^Decoder_State, tip: ct.Corner) -> ct.Corner {
 	set_free(ds.t, right_edge(tip), FREE_RIGHT)
 	set_free(ds.t, left_edge(tip), FREE_RIGHT)
 	zip_if_free_right(ds, left_edge(tip))
-	return pop_unlinked_gate(gs)
+	return pop_unlinked_gate(ds)
 }
 
 /*
@@ -528,161 +528,194 @@ assert_corner_table_consistent :: proc(t: ct.Corner_Table) {
 
 /**************************** PASS 2: GEOMETRY ********************************/
 
-decode_geometry_from :: proc(ds: ^Decoder_State, start: ct.Corner) {
-	log.debug("DGF")
-	t := ds.t
-
-	gs_c := ct.next(start)
-	gs_v := ct.c2v(t^, gs_c)
-	ge_c := ct.prev(start)
-	ge_v := ct.c2v(t^, ge_c)
-	on_border := ct.border_c(t^, gs_c)
-	log.debug("on border", on_border)
-
-	if on_border {
-		t.pos[gs_v] = read_vertex(ds)
-		ds.vertex_done[gs_v] = true
-		decode_geometry_hole(ds, gs_c)
-
-	} else { 	// closed component
-		t.pos[gs_v] = read_vertex(ds)
-		t.pos[ge_v] = ds.vtx_codec.decode_loop(t.pos[gs_v], read_vertex(ds))
-		ds.vertex_done[gs_v] = true
-		ds.vertex_done[ge_v] = true
-	}
-
-	decode_geometry(ds, start)
+/*
+Decode geometry of one component.
+*/
+decode_component_geometry :: proc(ds: ^Decoder_State, start: ct.Corner, comp: Component_Info) {
+	decode_gate_vertices(ds, start, comp.outer_boundary > 0)
+	decode_geometry_triangles(ds, start)
 }
 
-decode_geometry :: proc(ds: ^Decoder_State, c: ct.Corner) {
+/*
+Decode first vertices in component, different for boundary&closed component.
+*/
+decode_gate_vertices :: proc(ds: ^Decoder_State, tip: ct.Corner, has_boundary: bool) {
 	t := ds.t
-	c := c
+	gs_c := gate_start(tip)
+	gs := ct.c2v(t^, gs_c)
 
-	for {
-		ds.tri_done[ct.c2t(c)] = true
-		log.debug(ds.vertex_done)
+	t.pos[gs] = read_vertex(ds)
+	ds.vertex_done[gs] = true
 
-		v := ct.c2v(t^, c)
-		log.debug("decoding from corner", c, "vertex", v)
-		if !ds.vertex_done[v] { 	// C/S
-			log.debug("C or S")
-			standard_situation :=
-				t.op[c] != ct.INVALID_CORNER && ds.vertex_done[ct.c2v(t^, t.op[c])] == true
-			if standard_situation {
-				log.debug("standard situation")
-				t.pos[v] = ds.vtx_codec.decode_tip(vertex_codec_context(t^, c), read_vertex(ds))
-			} else { 	// initial triangle
-				log.debug("initial triangle")
-				ge_c := ct.prev(c)
-				ge_v := ct.c2v(t^, ge_c)
-				t.pos[v] = ds.vtx_codec.decode_loop(t.pos[ge_v], read_vertex(ds))
-			}
+	if has_boundary {
+		decode_hole_vertices(ds, gs_c)
+	} else {
+		ge := ct.c2v(t^, gate_end(tip))
+		t.pos[ge] = ds.vtx_codec.decode_loop(t.pos[gs], read_vertex(ds))
+		ds.vertex_done[ge] = true
+	}
+}
 
-			ds.vertex_done[v] = true
+decode_geometry_triangles :: proc(ds: ^Decoder_State, start: ct.Corner) {
+	t := ds.t^
+	assert(len(ds.gate_stack) == 0, "gate stack must be empty between components")
 
-			// try to decode hole, does nothing if not hole
-			decode_geometry_hole(ds, c)
+	gate := start
+	for gate != ct.INVALID_CORNER {
+		ds.tri_done[ct.c2t(gate)] = true
 
-			c = ct.right_of(t^, c)
-			continue
-		}
+		// symbol must be decided before tip is decoded (known vs not)
+		symbol := geometry_symbol(ds, gate)
+		decode_tip_vertex(ds, gate)
 
-		// TODO: extract out of this proc
-		is_done :: proc(ds: ^Decoder_State, c: ct.Corner) -> bool {
-			return c == ct.INVALID_CORNER || ds.tri_done[ct.c2t(c)]
-		}
-
-		// TODO: use stack again
-		right_done := is_done(ds, ct.right_of(t^, c))
-		left_done := is_done(ds, ct.left_of(t^, c))
-		switch {
-		case right_done && left_done:
-			log.debug("E")
-			return
-		case right_done:
-			log.debug("R")
-			c = ct.left_of(t^, c)
-		case left_done:
-			log.debug("L")
-			c = ct.right_of(t^, c)
-		case:
-			log.debug("S")
-			decode_geometry(ds, ct.right_of(t^, c))
-			c = ct.left_of(t^, c)
+		switch symbol {
+		case .C, .L:
+			gate = ct.right_of(t, gate)
+		case .R:
+			gate = ct.left_of(t, gate)
+		case .S:
+			push_gate(ds, ct.left_of(t, gate))
+			gate = ct.right_of(t, gate)
+		case .E:
+			gate = pop_undecoded_gate(ds)
 		}
 	}
 }
 
 /*
-Use loop decoding for all vertices starting from vertex of c.
-The initial vertex is not decoded here, must be done before.
+Is exactly the same decision as in encoder decide_clers.
 */
-decode_geometry_hole :: proc(ds: ^Decoder_State, c: ct.Corner) {
-	curr := c
+geometry_symbol :: proc(ds: ^Decoder_State, gate: ct.Corner) -> Operation {
+	t := ds.t^
+
+	tip_is_new := !ds.vertex_done[ct.c2v(t, gate)] && !ct.border_c(t, gate)
+	right_done := neighbour_done(ds^, ct.right_of(t, gate))
+	left_done := neighbour_done(ds^, ct.left_of(t, gate))
+
+	return clers_symbol(tip_is_new, right_done, left_done)
+}
+
+// border = also done
+neighbour_done :: proc(ds: Decoder_State, c: ct.Corner) -> bool {
+	return c == ct.INVALID_CORNER || ds.tri_done[ct.c2t(c)]
+}
+
+/*
+Decode the tip vertex position if tip is new.
+
+Encoder brother = smart_vertex_emit
+*/
+decode_tip_vertex :: proc(ds: ^Decoder_State, gate: ct.Corner) {
+	t := ds.t
+	v := ct.c2v(t^, gate)
+	if ds.vertex_done[v] {return}
+
+	if tip_prediction_available(ds^, gate) {
+		ctx := vertex_codec_context(t^, gate)
+		t.pos[v] = ds.vtx_codec.decode_tip(ctx, read_vertex(ds))
+	} else {
+		ge := ct.c2v(t^, gate_end(gate))
+		t.pos[v] = ds.vtx_codec.decode_loop(t.pos[ge], read_vertex(ds))
+	}
+	ds.vertex_done[v] = true
+
+	if ct.border_c(t^, gate) {
+		decode_hole_vertices(ds, gate)
+	}
+}
+
+// the op vtx to gate exists & is decoded
+tip_prediction_available :: proc(ds: Decoder_State, gate: ct.Corner) -> bool {
+	o := ct.op(ds.t^, gate)
+	return o != ct.INVALID_CORNER && ds.vertex_done[ct.c2v(ds.t^, o)]
+}
+
+decode_hole_vertices :: proc(ds: ^Decoder_State, c: ct.Corner) {
 	t := ds.t
 	initial := ct.c2v(t^, c)
+	curr := c
 
 	for {
-		next, found := ct.next_on_border(t^, curr)
-		if !found {
-			log.debug("This is not a hole, just C.")
-			return
-		}
+		n, found := ct.next_on_border(t^, curr)
+		assert(found, "border walk left the border...")
 
-		v := ct.c2v(t^, next)
-		if v == initial {return}
+		v := ct.c2v(t^, n)
+		if v == initial {return} 	// the loop has endeth
 
 		prev_pos := t.pos[ct.c2v(t^, curr)]
 		t.pos[v] = ds.vtx_codec.decode_loop(prev_pos, read_vertex(ds))
 		ds.vertex_done[v] = true
 
-		curr = next
+		curr = n
 	}
 }
-
 
 /****************************** Helpers ***************************************/
 
 is_linked :: #force_inline proc(c: ct.Corner) -> bool {return c >= 0}
 
 read_symbol :: proc(ds: ^Decoder_State) -> Operation {
+	assert(ds.sym_pos < len(ds.symbols), "ran out of symbols")
 	s := ds.symbols[ds.sym_pos]
 	ds.sym_pos += 1
 	return s
 }
 
 read_vertex :: proc(ds: ^Decoder_State) -> Vector3 {
+	assert(ds.vtx_pos < len(ds.vertices), "ran out of vertices")
 	v := ds.vertices[ds.vtx_pos]
 	ds.vtx_pos += 1
 	return v
 }
 
-new_vertex_id :: proc(ds: ^Decoder_State) -> ct.Vertex {
+reserve_vertex_id :: proc(ds: ^Decoder_State) -> ct.Vertex {
 	ds.last_vertex += 1
 	return ds.last_vertex
+}
+
+// return the first id
+reserve_vertex_ids :: proc(ds: ^Decoder_State, n: int) -> ct.Vertex {
+	first := ds.last_vertex + 1
+	ds.last_vertex += ct.Vertex(n)
+	return first
+}
+
+// tip of new (next) triangle
+peek_next_tip :: proc(ds: Decoder_State) -> ct.Corner {
+	return ct.Corner(3 * (ds.last_tri + 1))
+}
+
+// count a new triangle, return tip
+new_triangle :: proc(ds: ^Decoder_State) -> ct.Corner {
+	tip := peek_next_tip(ds^)
+	ds.last_tri += 1
+	return tip
 }
 
 /*
 Pushes gate to ds.gate_stack.
 */
-@(private = "file")
 push_gate :: #force_inline proc(ds: ^Decoder_State, gate: ct.Corner) {
 	append(&ds.gate_stack, Gate(gate))
 }
 
 /*
-Pop gate stack until unvisited gate is found.
+Pop gate stack until not linked gate is found.
 */
-@(private = "file")
-pop_unvisited :: #force_inline proc(ds: ^Decoder_State) -> ct.Corner {
-	for {
-		if len(ds.gate_stack) == 0 {return ct.INVALID_CORNER}
+pop_unlinked_gate :: #force_inline proc(ds: ^Decoder_State) -> ct.Corner {
+	for len(ds.gate_stack) > 0 {
+		candidate := ct.Corner(pop(&ds.gate_stack))
 
-		candidate := pop(&ds.gate_stack)
-
-		already_done := ds.t.op[candidate] >= 0
-		if !already_done {
-			return ct.Corner(candidate)
-		}
+		if !is_linked(ds.t.op[candidate]) {return candidate}
 	}
+	return ct.INVALID_CORNER
+}
+
+pop_undecoded_gate :: proc(ds: ^Decoder_State) -> ct.Corner {
+	for len(ds.gate_stack) > 0 {
+		candidate := ct.Corner(pop(&ds.gate_stack))
+
+		if !ds.tri_done[ct.c2t(candidate)] {return candidate}
+	}
+	return ct.INVALID_CORNER
 }
