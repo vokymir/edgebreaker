@@ -304,7 +304,9 @@ set_border :: proc(t: ^Corner_Table, c: Corner, initial: Vertex, count: int) {
 
 		current = next
 	}
-	assert(current == c || c2v(t^, current) == c2v(t^, c), "border walk is not closed")
+	r0, _ := rightmost(t^, c)
+	r1, _ := rightmost(t^, current)
+	assert(r0 == r1, "border walk must be closed")
 }
 
 /*
