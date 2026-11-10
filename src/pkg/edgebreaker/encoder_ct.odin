@@ -163,22 +163,20 @@ initial_triangle :: proc(es: ^Encoder_State_CT, t: ct.Corner_Table, gate: ct.Cor
 
 	hole_len := 0
 	on_border := ct.border_v(t, ct.c2v(t, gs))
+	gs_pos := ct.pos(t, gs)
+	ge_pos := ct.pos(t, ge)
 
-	if on_border {
-		mark(es, t, ge, .VISITED)
-		ge_pos := ct.pos(t, ge)
-		emit_vertex(es, ge_pos)
+	if on_border { 	// gs->...->ge(->tip)
+		mark(es, t, gs, .VISITED)
+		emit_vertex(es, gs_pos)
 
-		hole_len = visit_hole(es, t, ge)
+		hole_len = visit_hole(es, t, gs)
 
 	} else {
 		// emit the initial triangle geometry in order gs->ge(->tip in C/S)
 
 		mark(es, t, gs, .VISITED)
 		mark(es, t, ge, .VISITED)
-
-		gs_pos := ct.pos(t, gs)
-		ge_pos := ct.pos(t, ge)
 
 		emit_vertex(es, gs_pos)
 
@@ -369,20 +367,10 @@ smart_vertex_emit :: proc(es: ^Encoder_State_CT, t: ct.Corner_Table, gate: ct.Co
 
 		emit_vertex(es, correction)
 	} else {
-		on_border := ct.border_v(t, ct.c2v(t, ct.prev(gate)))
-		prev := ct.INVALID_CORNER
-
-		if on_border { 	// prev was gs
-			prev = ct.next(gate)
-
-		} else { 	// prev was ge
-			prev = ct.prev(gate)
-		}
-
+		prev := ct.prev(gate)
 		prev_pos := ct.pos(t, prev)
-		curr_pos := ct.pos(t, gate)
 
-		correction := es.vertex_codec.encode_loop(prev_pos, curr_pos)
+		correction := es.vertex_codec.encode_loop(prev_pos, v_pos)
 		emit_vertex(es, correction)
 	}
 }

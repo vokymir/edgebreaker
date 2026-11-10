@@ -284,7 +284,6 @@ set_ring :: proc(t: ^Corner_Table, c: Corner, v: Vertex) {
 
 /*
 Set border vertices to start from initial and increase by one each step.
-It traverses corners left, ie the component right - just as in the paper.
 */
 set_border :: proc(t: ^Corner_Table, c: Corner, initial: Vertex) {
 	current := c
@@ -292,9 +291,10 @@ set_border :: proc(t: ^Corner_Table, c: Corner, initial: Vertex) {
 
 	for {
 		set_ring(t, current, v)
-		current = left(t^, current)
+		next, found := next_on_border(t^, current)
 		v += 1
 
-		if current == c {break}
+		if !found || next == c {break}
+		current = next
 	}
 }
