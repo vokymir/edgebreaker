@@ -192,6 +192,12 @@ decode_connectivity :: proc(ds: ^Decoder_State, c: ct.Corner) {
 	c := c
 	initial := true
 
+	// TODO: extract from a proc
+	// mark an edge free only if glue hasn't already linked it
+	set_free :: proc(t: ^ct.Corner_Table, e, mark: ct.Corner) {
+		if !is_linked(t.op[e]) {t.op[e] = mark}
+	}
+
 	for {
 		c = attach_triangle(ds, c, initial)
 		initial = false
@@ -199,29 +205,29 @@ decode_connectivity :: proc(ds: ^Decoder_State, c: ct.Corner) {
 		tip := c
 		right_edge, left_edge := next(c), prev(c)
 
+		glue(ds, tip)
+
 		switch read_symbol(ds) {
 		case .C:
 			t.op[left_edge] = FREE_LEFT
 			t.c2v[tip] = new_vertex_id(ds)
 			c = right_edge
 		case .L:
-			t.op[left_edge] = FREE_RIGHT
-			zip(ds, left_edge)
+			set_free(t, left_edge, FREE_RIGHT)
+			if t.op[left_edge] == FREE_RIGHT {zip(ds, left_edge)}
 			c = right_edge
 		case .R:
-			t.op[right_edge] = FREE_RIGHT
+			set_free(t, right_edge, FREE_RIGHT)
 			c = left_edge
 		case .S:
 			push_gate(ds, left_edge)
 			c = right_edge
 		case .E:
-			t.op[right_edge] = FREE_RIGHT
-			t.op[left_edge] = FREE_RIGHT
-			zip(ds, left_edge)
+			set_free(t, right_edge, FREE_RIGHT)
+			set_free(t, left_edge, FREE_RIGHT)
+			if t.op[left_edge] == FREE_RIGHT {zip(ds, left_edge)}
 			c = pop_unvisited(ds)
 		}
-
-		glue(ds, tip)
 
 		if c == ct.INVALID_CORNER {break}
 	}
