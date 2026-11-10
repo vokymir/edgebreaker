@@ -1,5 +1,6 @@
 package corner_table
 
+import "core:log"
 Vec3 :: [3]f32
 
 Corner :: distinct int
@@ -207,7 +208,7 @@ border_v :: proc(t: Corner_Table, v: Vertex) -> bool {
    TODO: only return true if corner is bordering??? maybe not, then raname
 */
 border_c :: proc(t: Corner_Table, c: Corner) -> bool {
-	_, found := v2c_right_border(t, c2v(t, c))
+	_, found := rightmost(t, c)
 	return found
 }
 
@@ -218,7 +219,10 @@ corner (counter-clockwise)
 - found: if not on boundary, return false
 */
 v2c_right_border :: proc(t: Corner_Table, v: Vertex) -> (c := INVALID_CORNER, found := false) {
+	log.debug("v =", v)
+	log.debug(t)
 	initial := v2c(t, v)
+	log.debug("initial = ", initial)
 	if initial == INVALID_CORNER {return}
 	current := initial
 	next := current
@@ -256,7 +260,7 @@ Returns:
 */
 next_on_border :: proc(t: Corner_Table, c: Corner) -> (cb := INVALID_CORNER, found := false) {
 	if c == INVALID_CORNER {return}
-	bf := v2c_right_border(t, c2v(t, c)) or_return
+	bf := rightmost(t, c) or_return
 
 	cb = prev(bf)
 	found = true
@@ -268,16 +272,17 @@ Set all corners around v to have its c2v point to v. The corner c must be
 adjacent to vertex v.
 */
 set_ring :: proc(t: ^Corner_Table, c: Corner, v: Vertex) {
-	t.c2v[c] = v
-	curr, has_border := v2c_right_border(t^, c2v(t^, c))
-	if !has_border {curr = c}
+	log.debug("set ring for c,v:", c, v)
 
+	start, has_border := rightmost(t^, c)
+	if !has_border {start = c}
+
+	curr := start
 	for {
+		t.c2v[curr] = v
+
 		next := left(t^, curr)
-		if next == c || next == INVALID_CORNER {break} 	// done full circle
-
-		t.c2v[next] = v
-
+		if next == start || next < 0 {break} 	// done full circle
 		curr = next
 	}
 }
@@ -296,5 +301,18 @@ set_border :: proc(t: ^Corner_Table, c: Corner, initial: Vertex) {
 
 		if !found || next == c {break}
 		current = next
+	}
+}
+
+/*
+Return the rightmost corner of vertex. If not border, border is false
+*/
+rightmost :: proc(t: Corner_Table, c: Corner) -> (r: Corner, border: bool) {
+	cur := c
+	for {
+		n := right(t, cur)
+		if n == INVALID_CORNER {return cur, true}
+		if n == c {return c, false}
+		cur = n
 	}
 }
