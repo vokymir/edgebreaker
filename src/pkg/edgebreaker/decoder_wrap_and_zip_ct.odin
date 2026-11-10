@@ -153,10 +153,10 @@ begin_component :: proc(ds: ^Decoder_State, comp: Component_Info) -> (ct.Corner,
 		// reserve boundary vertices
 		log.debug("boundary component")
 
-		ds.t.c2v[base + 2] = first_vertex_id // ge
-		// minus 2: the ge and gs
+		ds.t.c2v[base + 1] = first_vertex_id // gs
+		// minus 2: the gs and ge
 		for i in 0 ..< (comp.outer_boundary - 2) {new_vertex_id(ds)}
-		ds.t.c2v[base + 1] = new_vertex_id(ds) // gs
+		ds.t.c2v[base + 2] = new_vertex_id(ds) // ge
 
 	} else { 	// CLOSED COMPONENT
 		log.debug("closed component")
@@ -237,27 +237,33 @@ attach_triangle :: proc(ds: ^Decoder_State, c: ct.Corner, initial: bool = false)
 }
 
 glue :: proc(ds: ^Decoder_State, tip: ct.Corner) {
+	log.debug("glue for", tip)
 	tip: int = int(tip)
 	t := ds.t
 
 	// HOLES on S corner
 	if len, ok := ds.holes[tip]; ok {
+		log.debug("hole on S corner")
 		for i in 0 ..< len {new_vertex_id(ds)}
 		return
 	}
 
 	// GLUING CORNERS - HOLES or HANDLES on arr corner
+	log.debug("gluing corner - hole or handle")
 	candidates := [2]int{tip + 1, tip + 2}
 
 	for can in candidates {
 		if !(can in ds.glues) {continue}
+		log.debug("gluing on corner", can)
 		can_c := ct.Corner(can)
 
 		s := ds.glues[can]
 		s_corner := ct.Corner(s)
 
+		log.debug("prev")
 		t.op[can] = s_corner
 		t.op[s_corner] = can_c
+		log.debug("post")
 
 		t.c2v[next(can_c)] = ct.c2v(t^, prev(s_corner))
 		t.c2v[prev(can_c)] = ct.c2v(t^, next(s_corner))
@@ -267,6 +273,7 @@ glue :: proc(ds: ^Decoder_State, tip: ct.Corner) {
 		// traverse the hole and assign vertex indices, always +1
 		initial := ct.c2v(t^, s_tip)
 		current := s_tip
+		log.debug("hole vertex assigning")
 		for {
 			next, found := ct.next_on_border(ds.t^, current)
 			if !found {log.debug("not found next corner on border"); break}
