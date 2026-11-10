@@ -262,3 +262,39 @@ next_on_border :: proc(t: Corner_Table, c: Corner) -> (cb := INVALID_CORNER, fou
 	found = true
 	return
 }
+
+/*
+Set all corners around v to have its c2v point to v. The corner c must be
+adjacent to vertex v.
+*/
+set_ring :: proc(t: ^Corner_Table, c: Corner, v: Vertex) {
+	t.c2v[c] = v
+	curr, has_border := v2c_right_border(t^, c2v(t^, c))
+	if !has_border {curr = c}
+
+	for {
+		next := left(t^, curr)
+		if next == c || next == INVALID_CORNER {break} 	// done full circle
+
+		t.c2v[next] = v
+
+		curr = next
+	}
+}
+
+/*
+Set border vertices to start from initial and increase by one each step.
+It traverses corners left, ie the component right - just as in the paper.
+*/
+set_border :: proc(t: ^Corner_Table, c: Corner, initial: Vertex) {
+	current := c
+	v := initial
+
+	for {
+		set_ring(t, current, v)
+		current = left(t^, current)
+		v += 1
+
+		if current == c {break}
+	}
+}

@@ -108,9 +108,13 @@ decode_wrap_and_zip_ct :: proc(
 	// pass 1: connectivity
 	for comp in em.components {
 		log.debug("component", comp)
-		start := begin_component(&ds, comp)
+		start, first_vertex_id := begin_component(&ds, comp)
 		append(&starts, start)
 		decode_connectivity(&ds, start)
+
+		if comp.outer_boundary > 0 { 	// set border corners to point to its vertices
+			ct.set_border(ds.t, start + 2, first_vertex_id)
+		}
 	}
 	assert(ds.sym_pos == len(ds.symbols), "unused symbols")
 
@@ -122,31 +126,33 @@ decode_wrap_and_zip_ct :: proc(
 	assert(ds.vtx_pos == len(ds.vertices), "unused vertices")
 }
 
-begin_component :: proc(ds: ^Decoder_State, comp: Component_Info) -> ct.Corner {
+begin_component :: proc(ds: ^Decoder_State, comp: Component_Info) -> (ct.Corner, ct.Vertex) {
 	log.debug("begin component", comp)
 	this_tri := ds.last_tri + 1
 	base := ct.Corner(3 * this_tri)
+
+	first_vertex_id := new_vertex_id(ds)
 
 	if comp.outer_boundary != 0 { 	// BOUNDARY COMPONENT
 		// reserve boundary vertices
 		log.debug("boundary component")
 
-		ds.t.c2v[base + 2] = new_vertex_id(ds)
+		ds.t.c2v[base + 2] = first_vertex_id // ge
 		// minus 2: the ge and gs
 		for i in 0 ..< (comp.outer_boundary - 2) {new_vertex_id(ds)}
-		ds.t.c2v[base + 1] = new_vertex_id(ds)
+		ds.t.c2v[base + 1] = new_vertex_id(ds) // gs
 
 	} else { 	// CLOSED COMPONENT
 		log.debug("closed component")
 
-		ds.t.c2v[base + 1] = new_vertex_id(ds) // gs
+		ds.t.c2v[base + 1] = first_vertex_id // gs
 		ds.t.c2v[base + 2] = new_vertex_id(ds) // ge
 
 		ds.t.op[base + 0] = FREE_LEFT
 		ds.t.op[base + 2] = FREE_LEFT
 	}
 
-	return -1 * base
+	return -1 * base, first_vertex_id
 }
 
 decode_connectivity :: proc(ds: ^Decoder_State, c: ct.Corner) {
@@ -155,6 +161,7 @@ decode_connectivity :: proc(ds: ^Decoder_State, c: ct.Corner) {
 	c := c
 
 	for {
+		if c == ct.INVALID_CORNER {break}
 		c = attach_triangle(ds, c)
 
 		tip := c
@@ -182,13 +189,12 @@ decode_connectivity :: proc(ds: ^Decoder_State, c: ct.Corner) {
 			t.op[left_edge] = FREE_RIGHT
 			zip(ds, left_edge)
 			c = pop_unvisited(ds)
-			if c == ct.INVALID_CORNER {return}
 		}
 	}
 }
 
 attach_triangle :: proc(ds: ^Decoder_State, c: ct.Corner) -> ct.Corner {
-	log.debug("attach triangle")
+	log.debug("attach triangle from corner", c)
 	c := c
 	t := ds.t
 	ds.last_tri += 1
@@ -214,13 +220,12 @@ glue :: proc(ds: ^Decoder_State, tip: ct.Corner) {
 	tip: int = int(tip)
 	t := ds.t
 
-	// HOLES
+	// HOLES on S corner
 	if len, ok := ds.holes[tip]; ok {
 		for i in 0 ..< len {new_vertex_id(ds)}
-		delete_key(&ds.holes, tip)
 	}
 
-	// GLUING CORNERS
+	// GLUING CORNERS - HOLES or HANDLES on arr corner
 	candidates := [3]int{tip, tip + 1, tip + 2}
 
 	gluing_edge := ct.INVALID_CORNER
@@ -239,6 +244,22 @@ glue :: proc(ds: ^Decoder_State, tip: ct.Corner) {
 
 	t.c2v[gluing_edge + 1] = ct.c2v(t^, prev(s_corner))
 	t.c2v[gluing_edge + 2] = ct.c2v(t^, next(s_corner))
+
+	// HOLES on arr corner = assign vertices
+	s_tip := ct.next(s_corner)
+	// traverse the hole and assign vertex indices, always +1
+	initial := ct.c2v(ds.t^, s_tip)
+	current := s_tip
+	for {
+		next, found := ct.next_on_border(ds.t^, current)
+		if !found {log.error("not found next corner on border")}
+
+		// set all corners around this next vertex to has vtx_id in c2v
+		vtx_id := ds.t.c2v[current] + 1
+		ct.set_ring(ds.t, next, vtx_id)
+
+		current = next
+	}
 
 	zip(ds, ct.Corner(gluing_edge))
 }
