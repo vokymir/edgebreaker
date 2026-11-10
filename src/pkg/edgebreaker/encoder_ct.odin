@@ -132,23 +132,11 @@ compress_component :: proc(es: ^Encoder_State_CT, t: ct.Corner_Table, gate: ct.C
 @(private = "file")
 decide_clers :: proc(es: ^Encoder_State_CT, t: ct.Corner_Table, gate: ct.Corner) -> Operation {
 
-	right := ct.op(t, ct.next(gate))
-	left := ct.op(t, ct.prev(gate))
-	right_done := right == ct.INVALID_CORNER || es.tri_step[ct.c2t(right)] != 0
-	left_done := left == ct.INVALID_CORNER || es.tri_step[ct.c2t(left)] != 0
+	tip_is_new := is_marked(es^, t, gate, .NOT_VISITED)
+	right_done := tri_visited(es^, ct.right_of(t, gate))
+	left_done := tri_visited(es^, ct.left_of(t, gate))
 
-	switch {
-	case is_marked(es^, t, gate, .NOT_VISITED):
-		return .C
-	case right_done && left_done:
-		return .E
-	case right_done:
-		return .R
-	case left_done:
-		return .L
-	case:
-		return .S
-	}
+	return clers_symbol(tip_is_new, right_done, left_done)
 }
 
 /*
@@ -239,14 +227,9 @@ and therefore saves the information about hole or handle.
 */
 @(private = "file") // becuase name might be reused in decoding
 check_handles :: proc(es: ^Encoder_State_CT, t: ct.Corner_Table, gate: ct.Corner, step: int) {
-	// the two non-gate edges
-	sides := [2]struct {
-		edge_corner: ct.Corner,
-		side:        Side,
-	}{{ct.next(gate), .RIGHT}, {ct.prev(gate), .LEFT}}
 
-	for s in sides {
-		n := ct.op(t, s.edge_corner)
+	for side in ([2]Side{.RIGHT, .LEFT}) {
+		n := ct.op(t, side_corner(gate, side))
 		if n == ct.INVALID_CORNER {continue} 	// mesh border
 
 		n_step := es.tri_step[ct.c2t(n)]
@@ -258,7 +241,7 @@ check_handles :: proc(es: ^Encoder_State_CT, t: ct.Corner_Table, gate: ct.Corner
 		arrival := step
 		hole_len := es.hole_len_of_s[n_step - 1] // 0 if absent
 
-		emit_topology(es, s_step, arrival, s.side, hole_len)
+		emit_topology(es, s_step, arrival, side, hole_len)
 	}
 
 }
@@ -416,6 +399,11 @@ tri_step :: #force_inline proc(
 @(private = "file")
 tri_step_eq :: #force_inline proc(es: Encoder_State_CT, c: ct.Corner, step: int) -> bool {
 	return es.tri_step[ct.c2t(c)] == step
+}
+
+@(private = "file")
+tri_visited :: proc(es: Encoder_State_CT, c: ct.Corner) -> bool {
+	return c == ct.INVALID_CORNER || es.tri_step[ct.c2t(c)] != 0
 }
 
 @(private = "file")
