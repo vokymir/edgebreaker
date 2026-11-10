@@ -69,7 +69,7 @@ c2v :: #force_inline proc(t: Corner_Table, c: Corner) -> Vertex {
 
 // return index of triangle containing corner c
 c2t :: #force_inline proc(c: Corner) -> Triangle {
-	if c == INVALID_CORNER {return INVALID_TRIANGLE}
+	if c < 0 {return INVALID_TRIANGLE}
 	return Triangle(c / 3)
 }
 
@@ -157,7 +157,7 @@ vertices
 */
 VC :: proc(t: Corner_Table, v: Vertex, corners: ^[dynamic]Corner, loc := #caller_location) {
 	initial := v2c(t, v)
-	if initial == INVALID_CORNER {return}
+	if initial < 0 {return}
 	current := initial
 	append(corners, current, loc)
 
@@ -168,7 +168,7 @@ VC :: proc(t: Corner_Table, v: Vertex, corners: ^[dynamic]Corner, loc := #caller
 			if current == initial {
 				return // done the whole circle around vertex
 			}
-			if current == INVALID_CORNER {
+			if current < 0 {
 				break _left // must now go from initial to the right
 			}
 			append(corners, current, loc)
@@ -184,7 +184,7 @@ VC :: proc(t: Corner_Table, v: Vertex, corners: ^[dynamic]Corner, loc := #caller
 		if current == initial {
 			return
 		}
-		if current == INVALID_CORNER {
+		if current < 0 {
 			break
 		}
 		append(corners, current, loc)
@@ -223,7 +223,7 @@ v2c_right_border :: proc(t: Corner_Table, v: Vertex) -> (c := INVALID_CORNER, fo
 	log.debug(t)
 	initial := v2c(t, v)
 	log.debug("initial = ", initial)
-	if initial == INVALID_CORNER {return}
+	if initial < 0 {return}
 	current := initial
 	next := current
 
@@ -233,7 +233,7 @@ v2c_right_border :: proc(t: Corner_Table, v: Vertex) -> (c := INVALID_CORNER, fo
 		if next == initial {
 			return // full-circle => not boundary
 		}
-		if next == INVALID_CORNER {
+		if next < 0 {
 			return current, true
 		}
 		current = next
@@ -259,7 +259,7 @@ Returns:
 - found: bool
 */
 next_on_border :: proc(t: Corner_Table, c: Corner) -> (cb := INVALID_CORNER, found := false) {
-	if c == INVALID_CORNER {return}
+	if c < 0 {return}
 	bf := rightmost(t, c) or_return
 
 	cb = prev(bf)
@@ -316,7 +316,7 @@ rightmost :: proc(t: Corner_Table, c: Corner) -> (r: Corner, border: bool) {
 	for {
 		log.debug(cur)
 		n := right(t, cur)
-		if n == INVALID_CORNER {return cur, true}
+		if n < 0 {return cur, true}
 		if n == c {return c, false}
 		cur = n
 	}
