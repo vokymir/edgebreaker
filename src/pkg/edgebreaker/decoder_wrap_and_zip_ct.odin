@@ -416,37 +416,117 @@ finish_component :: proc(
 
 /********************************** ZIP ***************************************/
 
+/*
+Zip only if a waiting pair from right exists. (avoids already glued edges)
+*/
+zip_if_free_right :: proc(ds: ^Decoder_State, edge: ct.Corner) {
+	if ds.t.op[edge] == FREE_RIGHT {zip(ds, edge)}
+}
+
+/*
+Link the FREE-R edge (c)with FREE-L waiting pair, then continue if possible.
+*/
 zip :: proc(ds: ^Decoder_State, c: ct.Corner) {
-	log.debug("zip")
 	t := ds.t
 	c := c
 
-	for {
-		b := next(c)
-		for is_linked(t.op[b]) {b = next(t.op[b])} 	// TODO: potential inf loop for
-		// corrupted input (connected)
+	for t.op[c] == FREE_RIGHT {
+		b := zip_pair(t^, c)
 		if t.op[b] != FREE_LEFT {return}
 
 		t.op[c], t.op[b] = b, c
+		relabel_fan(t, c, b)
 
-		// all corners around this vertex must reference this vertex now
-		a := prev(c)
-		log.debug("1.1")
-		t.c2v[prev(a)] = ct.c2v(t^, prev(b))
-		log.debug("1.2")
-		for is_linked(t.op[a]) && a != b {
-			a = prev(t.op[a])
-			log.debug("2.1")
-			t.c2v[prev(a)] = ct.c2v(t^, prev(b))
-			log.debug("2.2")
-		}
-
-		// return if done, continue with c if we should
-		c = prev(c)
-		for is_linked(t.op[c]) && c != b {c = prev(t.op[c])}
-		if t.op[c] != FREE_RIGHT {return}
+		c = zip_next(t^, c, b)
 	}
 }
+
+/*
+Find first corner on vertex_of(c) which isn't linked.
+*/
+zip_pair :: proc(t: ct.Corner_Table, c: ct.Corner) -> ct.Corner {
+	b := next(c)
+
+	for steps := 0; is_linked(t.op[b]); steps += 1 {
+		assert(steps < len(t.op), "zip: endless walk (corrupted input?)")
+		b = next(t.op[b])
+	}
+
+	return b
+}
+
+/*
+Every corner in fan between must has vertex_of(b).
+prev(b) must be the vertex v
+*/
+relabel_fan :: proc(t: ^ct.Corner_Table, c, b: ct.Corner) {
+	v := t.c2v[prev(b)]
+
+	a := prev(c)
+	t.c2v[prev(a)] = v
+
+	for steps := 0; is_linked(t.op[a]) && a != b; steps += 1 {
+		assert(steps < len(t.op), "zip: endless walk (corrupted input?)")
+		a = prev(t.op[a])
+		t.c2v[prev(a)] = v
+	}
+}
+
+/*
+After c and b were linked, where to continue zipping?
+the free end on the other side of c
+*/
+zip_next :: proc(t: ct.Corner_Table, c, b: ct.Corner) -> ct.Corner {
+	c := prev(c)
+
+	for steps := 0; is_linked(t.op[c]) && c != b; steps += 1 {
+		assert(steps < len(t.op), "zip: endless walk (corrupted input?)")
+		c = prev(t.op[c])
+	}
+
+	return c
+}
+
+/******************************** CORNER TABLE ********************************/
+
+/*
+not linked edge = border. fill t.v2c and assert nothing unresolved
+*/
+finalize_corner_table :: proc(ds: ^Decoder_State, loc := #caller_location) {
+	t := ds.t
+
+	for &o in t.op {
+		if o < 0 {o = ct.INVALID_CORNER}
+	}
+
+	resize(&t.v2c, len(t.pos), loc)
+	slice.fill(t.v2c[:], ct.INVALID_CORNER)
+
+	for c in 0 ..< len(t.c2v) {
+		v := t.c2v[c]
+		assert(v != ct.INVALID_VERTEX, "unresolved corner")
+		t.v2c[v] = ct.Corner(c)
+	}
+
+	for c in t.v2c {
+		assert(c != ct.INVALID_CORNER, "unresolved vertex")
+	}
+}
+
+@(disabled = ODIN_DISABLE_ASSERT)
+assert_corner_table_consistent :: proc(t: ct.Corner_Table) {
+	for i in 0 ..< len(t.op) {
+		c := ct.Corner(i)
+		o := t.op[c]
+		if o == ct.INVALID_CORNER {continue}
+
+		assert(t.op[o] == c, "op is not symmetric")
+		assert(t.c2v[next(c)] == t.c2v[prev(o)], "shared edge: start vertices differ")
+		assert(t.c2v[prev(c)] == t.c2v[next(o)], "shared edge: end vertices differ")
+	}
+}
+
+/**************************** PASS 2: GEOMETRY ********************************/
 
 decode_geometry_from :: proc(ds: ^Decoder_State, start: ct.Corner) {
 	log.debug("DGF")
