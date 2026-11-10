@@ -4,6 +4,7 @@ edgebreaker binary format.
 */
 package edgebreaker
 
+// TODO: this is not actual anymore
 /*
 INFO about structure and assumptions
 
