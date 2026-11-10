@@ -292,19 +292,19 @@ set_ring :: proc(t: ^Corner_Table, c: Corner, v: Vertex) {
 /*
 Set border vertices to start from initial and increase by one each step.
 */
-set_border :: proc(t: ^Corner_Table, c: Corner, initial: Vertex) {
+set_border :: proc(t: ^Corner_Table, c: Corner, initial: Vertex, count: int) {
 	log.debug("setting border: c,initial_v", c, initial)
 	current := c
-	v := initial
 
-	for {
-		set_ring(t, current, v)
+	for i in 0 ..< count {
+		set_ring(t, current, initial + Vertex(i))
+
 		next, found := next_on_border(t^, current)
-		v += 1
+		assert(found, "border walk")
 
-		if !found || c2v(t^, next) == initial {break}
 		current = next
 	}
+	assert(current == c || c2v(t^, current) == c2v(t^, c), "border walk is not closed")
 }
 
 /*
