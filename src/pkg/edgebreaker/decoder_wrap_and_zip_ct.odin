@@ -34,6 +34,7 @@ Decoder_State :: struct {
 	vtx_pos:     int,
 	vertex_done: []bool,
 	tri_done:    []bool,
+	vtx_codec:   Vertex_Codec,
 }
 
 init_ds :: proc(
@@ -68,6 +69,7 @@ init_ds :: proc(
 		vtx_pos     = 0,
 		vertex_done = make([]bool, n_vertices, allocator, loc),
 		tri_done    = make([]bool, n_triangles, allocator, loc),
+		vtx_codec   = vertex_codec_of(em.vertex_codec),
 	}
 
 	ds.holes = make(map[int]int, allocator, loc)
@@ -300,25 +302,30 @@ zip :: proc(ds: ^Decoder_State, c: ct.Corner) {
 	}
 }
 
-// TODO: ALL GEOMETRY
 decode_geometry_from :: proc(ds: ^Decoder_State, start: ct.Corner) {
 	log.debug("DGF")
 	t := ds.t
-	base := start - 1
+	base := start
 
-	// TODO: ordering of initial triangle vertices
-	for corner in ([3]ct.Corner{base + 1, base + 2, base}) {
-		log.debug("in")
-		v := ct.c2v(t^, corner) // TODO: HERE IS -1 index
-		log.debug("out")
-		t.pos[v] = read_vertex(ds)
-		ds.vertex_done[v] = true
+	gs := ct.next(base)
+	ge := ct.prev(base)
+	on_border := ct.border_c(ds.t^, ct.next(base))
+
+	if on_border {
+		t.pos[gs] = read_vertex(ds)
+		ds.vertex_done[gs] = true
+		decode_geometry_hole(ds, gs)
+
+	} else { 	// closed component
+		t.pos[gs] = read_vertex(ds)
+		t.pos[ge] = ds.vtx_codec.decode_loop(t.pos[gs], read_vertex(ds))
+		ds.vertex_done[gs] = true
+		ds.vertex_done[ge] = true
 	}
-	ds.tri_done[ct.c2t(base)] = true
+
 	decode_geometry(ds, t.op[start])
 }
 
-// TODO: ALL GEOMETRY
 decode_geometry :: proc(ds: ^Decoder_State, c: ct.Corner) {
 	t := ds.t
 	c := c
@@ -327,9 +334,18 @@ decode_geometry :: proc(ds: ^Decoder_State, c: ct.Corner) {
 		ds.tri_done[ct.c2t(c)] = true
 
 		v := ct.c2v(t^, c)
-		if !ds.vertex_done[v] { 	// C
-			// t.pos[v] = ds.predictor.predict(vertex_codec_context(t^, c)) + read_vertex(ds)
+		if !ds.vertex_done[v] { 	// C/S
+			if t.op[v] != ct.INVALID_CORNER { 	// standard situation
+				t.pos[v] = ds.vtx_codec.decode_tip(vertex_codec_context(t^, c), read_vertex(ds))
+			} else { 	// initial triangle
+				gs := ct.prev(c)
+				t.pos[v] = ds.vtx_codec.decode_loop(t.pos[gs], read_vertex(ds))
+			}
+
 			ds.vertex_done[v] = true
+
+			decode_geometry_hole(ds, c)
+
 			c = ct.right_of(t^, c)
 			continue
 		}
@@ -348,6 +364,32 @@ decode_geometry :: proc(ds: ^Decoder_State, c: ct.Corner) {
 			decode_geometry(ds, ct.right_of(t^, c))
 			c = ct.left_of(t^, c)
 		}
+	}
+}
+
+/*
+Use loop decoding for all vertices starting from vertex of c.
+The initial vertex is not decoded here, must be done before.
+*/
+decode_geometry_hole :: proc(ds: ^Decoder_State, c: ct.Corner) {
+	curr := c
+	t := ds.t
+	initial := ct.c2v(t^, c)
+
+	for {
+		next, found := ct.next_on_border(t^, curr)
+		if !found {
+			log.panic("Cannot find next boundary corner in hole.")
+		}
+
+		v := ct.c2v(t^, next)
+		if v == initial {return}
+
+		prev_pos := t.pos[ct.c2v(t^, curr)]
+		t.pos[v] = ds.vtx_codec.decode_loop(prev_pos, read_vertex(ds))
+		ds.vertex_done[v] = true
+
+		curr = next
 	}
 }
 
