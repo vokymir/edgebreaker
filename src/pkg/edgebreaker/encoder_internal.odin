@@ -6,12 +6,6 @@ import "base:runtime"
 import "core:log"
 import "core:slice"
 
-/* NOTE: another declarations might be in related compression files
-
-Those declarations are dependant on some part of implementation or data
-structure, while these here are univeral for edgebreaker.
-*/
-
 /***************************** Enums ******************************************/
 
 /*
@@ -27,13 +21,12 @@ Mark :: enum {
 
 /*
 Stores the state of edgebreaker algorithm during compression.
-Is only used with corner table.
 */
 Encoder_State :: struct {
 	// for destroy
 	allocator:     runtime.Allocator,
 
-	// as many as vertices, ordered as in ct.geometry
+	// as many as vertices, ordered as in ct.pos
 	vertex_marks:  []Mark,
 	// in which step a triangle was discovered (0=never)
 	tri_step:      []int,
@@ -42,7 +35,7 @@ Encoder_State :: struct {
 	// store S step -> number of hole vertices
 	hole_len_of_s: map[int]int,
 
-	// predicts position of next vertex
+	// encode vertex positions
 	vertex_codec:  Vertex_Codec,
 	// ptr to resulting Vertex_Codec
 	em:            ^Encoded_Mesh,
@@ -90,9 +83,7 @@ destroy_es :: proc(es: ^Encoder_State, loc := #caller_location) {
 /***************************** Compression ************************************/
 
 /*
-Compress mesh represented via corner table and use Encoder_State.handler to
-handle (store/send) data.
-The encoder_state struct must be initialized before.
+Compress mesh represented via corner table.
 
 The caller is responsible for freeing returned em.
 */
@@ -115,6 +106,7 @@ compress_internal :: proc(
 
 	em = new(Encoded_Mesh, allocator, loc)
 	init_em(em, len(t.c2v) / 3, len(t.pos), allocator, loc)
+	em.vertex_codec = es.vertex_codec.kind
 	es.em = em
 
 	mark_all_holes(&es, t)
@@ -227,8 +219,7 @@ initial_triangle :: proc(es: ^Encoder_State, t: ct.Corner_Table, gate: ct.Corner
 }
 
 /*
-Handle C operation, the main reason for decomposition is calculation of
-prediction and correction.
+Handle C operation.
 */
 C :: proc(es: ^Encoder_State, t: ct.Corner_Table, gate: ct.Corner) -> ct.Corner {
 	emit_symbol(es, .C)
@@ -340,7 +331,7 @@ WARN: it does not handle the first vertex
 Mark all vertices in the hole as visited and return number of those vertices =
 length of hole.
 
-Starting from gate-vertex all vertices are marked & emitted.
+Starting from gate-vertex (not including) all vertices are marked & emitted.
 */
 visit_hole :: proc(es: ^Encoder_State, t: ct.Corner_Table, gate: ct.Corner) -> int {
 	log.debug(is_marked(es^, t, gate, .HOLE), ct.border_v(t, ct.c2v(t, gate)))
@@ -403,8 +394,6 @@ smart_vertex_emit :: proc(es: ^Encoder_State, t: ct.Corner_Table, gate: ct.Corne
 }
 
 /******************************* Clarity helpers ******************************/
-// all are private to file because they are very small
-// NOTE: might be shared across encoders eventually
 
 mark :: #force_inline proc(
 	es: ^Encoder_State,
@@ -440,7 +429,7 @@ tri_step_eq :: #force_inline proc(es: Encoder_State, c: ct.Corner, step: int) ->
 	return es.tri_step[ct.c2t(c)] == step
 }
 
-tri_visited :: proc(es: Encoder_State, c: ct.Corner) -> bool {
+tri_visited :: #force_inline proc(es: Encoder_State, c: ct.Corner) -> bool {
 	return c == ct.INVALID_CORNER || es.tri_step[ct.c2t(c)] != 0
 }
 
