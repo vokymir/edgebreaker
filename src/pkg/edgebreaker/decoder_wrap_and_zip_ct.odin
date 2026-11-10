@@ -123,6 +123,7 @@ decode_wrap_and_zip_ct :: proc(
 	resize(&t.v2c, len(t.pos), loc)
 	for c in 0 ..< len(t.c2v) {t.v2c[t.c2v[c]] = ct.Corner(c)}
 
+	log.debug(ds)
 	// pass 2: geometry
 	for start in starts {decode_geometry_from(&ds, start)}
 	assert(ds.vtx_pos == len(ds.vertices), "unused vertices")
@@ -305,25 +306,27 @@ zip :: proc(ds: ^Decoder_State, c: ct.Corner) {
 decode_geometry_from :: proc(ds: ^Decoder_State, start: ct.Corner) {
 	log.debug("DGF")
 	t := ds.t
-	base := start
 
-	gs := ct.next(base)
-	ge := ct.prev(base)
-	on_border := ct.border_c(ds.t^, ct.next(base))
+	gs_c := ct.next(start)
+	gs_v := ct.c2v(t^, gs_c)
+	ge_c := ct.prev(start)
+	ge_v := ct.c2v(t^, ge_c)
+	on_border := ct.border_c(t^, gs_c)
+	log.debug("on border", on_border)
 
 	if on_border {
-		t.pos[gs] = read_vertex(ds)
-		ds.vertex_done[gs] = true
-		decode_geometry_hole(ds, gs)
+		t.pos[gs_v] = read_vertex(ds)
+		ds.vertex_done[gs_v] = true
+		decode_geometry_hole(ds, gs_c)
 
 	} else { 	// closed component
-		t.pos[gs] = read_vertex(ds)
-		t.pos[ge] = ds.vtx_codec.decode_loop(t.pos[gs], read_vertex(ds))
-		ds.vertex_done[gs] = true
-		ds.vertex_done[ge] = true
+		t.pos[gs_v] = read_vertex(ds)
+		t.pos[ge_v] = ds.vtx_codec.decode_loop(t.pos[gs_v], read_vertex(ds))
+		ds.vertex_done[gs_v] = true
+		ds.vertex_done[ge_v] = true
 	}
 
-	decode_geometry(ds, t.op[start])
+	decode_geometry(ds, start)
 }
 
 decode_geometry :: proc(ds: ^Decoder_State, c: ct.Corner) {
@@ -332,18 +335,27 @@ decode_geometry :: proc(ds: ^Decoder_State, c: ct.Corner) {
 
 	for {
 		ds.tri_done[ct.c2t(c)] = true
+		log.debug(ds.vertex_done)
 
 		v := ct.c2v(t^, c)
+		log.debug("decoding from corner", c, "vertex", v)
 		if !ds.vertex_done[v] { 	// C/S
-			if t.op[v] != ct.INVALID_CORNER { 	// standard situation
+			log.debug("C or S")
+			standard_situation :=
+				t.op[c] != ct.INVALID_CORNER && ds.vertex_done[ct.c2v(t^, t.op[c])] == true
+			if standard_situation {
+				log.debug("standard situation")
 				t.pos[v] = ds.vtx_codec.decode_tip(vertex_codec_context(t^, c), read_vertex(ds))
 			} else { 	// initial triangle
-				gs := ct.prev(c)
-				t.pos[v] = ds.vtx_codec.decode_loop(t.pos[gs], read_vertex(ds))
+				log.debug("initial triangle")
+				gs_c := ct.prev(c)
+				gs_v := ct.c2v(t^, gs_c)
+				t.pos[v] = ds.vtx_codec.decode_loop(t.pos[gs_v], read_vertex(ds))
 			}
 
 			ds.vertex_done[v] = true
 
+			// try to decode hole, does nothing if not hole
 			decode_geometry_hole(ds, c)
 
 			c = ct.right_of(t^, c)
@@ -354,13 +366,16 @@ decode_geometry :: proc(ds: ^Decoder_State, c: ct.Corner) {
 		left_done := ds.tri_done[ct.c2t(ct.left_of(t^, c))]
 		switch {
 		case right_done && left_done:
+			log.debug("E")
 			return
 		case right_done:
+			log.debug("R")
 			c = ct.left_of(t^, c)
 		case left_done:
+			log.debug("L")
 			c = ct.right_of(t^, c)
 		case:
-			// S :)
+			log.debug("S")
 			decode_geometry(ds, ct.right_of(t^, c))
 			c = ct.left_of(t^, c)
 		}
@@ -379,7 +394,8 @@ decode_geometry_hole :: proc(ds: ^Decoder_State, c: ct.Corner) {
 	for {
 		next, found := ct.next_on_border(t^, curr)
 		if !found {
-			log.panic("Cannot find next boundary corner in hole.")
+			log.debug("This is not a hole, just C.")
+			return
 		}
 
 		v := ct.c2v(t^, next)
