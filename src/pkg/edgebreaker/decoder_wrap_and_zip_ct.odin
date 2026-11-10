@@ -17,7 +17,6 @@ Decoder_State :: struct {
 	t:           ^ct.Corner_Table,
 	symbols:     []Operation,
 	vertices:    []Vector3,
-	predictor:   Vertex_Codec,
 	allocator:   runtime.Allocator,
 
 	//
@@ -47,6 +46,11 @@ init_ds :: proc(
 	n_triangles := len(em.symbols)
 	n_vertices := len(em.vertices)
 
+	assert(len(t.pos) == 0, "not empty corner table")
+	assert(len(t.c2v) == 0, "not empty corner table")
+	assert(len(t.op) == 0, "not empty corner table")
+	assert(len(t.v2c) == 0, "not empty corner table")
+
 	resize(&t.pos, n_vertices, loc)
 	resize(&t.c2v, 3 * n_triangles, loc)
 	resize(&t.op, 3 * n_triangles, loc)
@@ -57,7 +61,6 @@ init_ds :: proc(
 		t           = t,
 		symbols     = em.symbols[:],
 		vertices    = em.vertices[:],
-		predictor   = vertex_codec_of(em.vertex_codec),
 		allocator   = allocator,
 		//
 		gate_stack  = make([dynamic]Gate, allocator, loc),
@@ -90,6 +93,8 @@ destroy_ds :: proc(ds: ^Decoder_State, loc := #caller_location) {
 	delete(ds.vertex_done, ds.allocator, loc)
 	delete(ds.tri_done, ds.allocator, loc)
 	delete(ds.gate_stack, loc)
+	delete(ds.holes, loc)
+	delete(ds.glues, loc)
 }
 
 @(private)
@@ -119,6 +124,7 @@ decode_wrap_and_zip_ct :: proc(
 		}
 	}
 	assert(ds.sym_pos == len(ds.symbols), "unused symbols")
+	assert(int(ds.last_vertex + 1) == len(em.vertices), "missing vertex")
 	for &o in t.op {if o < 0 {o = ct.INVALID_CORNER}}
 
 	log.debug(t)
@@ -166,16 +172,16 @@ begin_component :: proc(ds: ^Decoder_State, comp: Component_Info) -> (ct.Corner,
 }
 
 /*
-Assumes that it starts the component, ie it inverts the initial c -> -c, so
-attach_triangle() knows.
 */
 decode_connectivity :: proc(ds: ^Decoder_State, c: ct.Corner) {
 	log.debug("decode connectivity", c)
 	t := ds.t
-	c := -1 * c
+	c := c
+	initial := true
 
 	for {
-		c = attach_triangle(ds, c)
+		c = attach_triangle(ds, c, initial)
+		initial = false
 
 		tip := c
 		right_edge, left_edge := next(c), prev(c)
@@ -208,14 +214,14 @@ decode_connectivity :: proc(ds: ^Decoder_State, c: ct.Corner) {
 	}
 }
 
-attach_triangle :: proc(ds: ^Decoder_State, c: ct.Corner) -> ct.Corner {
+attach_triangle :: proc(ds: ^Decoder_State, c: ct.Corner, initial: bool = false) -> ct.Corner {
 	log.debug("attach triangle from corner", c)
 	c := c
 	t := ds.t
 	ds.last_tri += 1
 	tip := ct.Corner(3 * ds.last_tri)
 
-	if c > 0 { 	// standard situation
+	if !initial { 	// standard situation
 		log.debug("standard")
 		t.op[c], t.op[tip] = tip, c
 
@@ -225,7 +231,6 @@ attach_triangle :: proc(ds: ^Decoder_State, c: ct.Corner) -> ct.Corner {
 		// in initial triangle, nothing is to do
 	} else { 	// initial triangle
 		log.debug("initial")
-		c *= -1
 	}
 
 	return tip
@@ -283,7 +288,8 @@ zip :: proc(ds: ^Decoder_State, c: ct.Corner) {
 
 	for {
 		b := next(c)
-		for is_linked(t.op[b]) {b = next(t.op[b])}
+		for is_linked(t.op[b]) {b = next(t.op[b])} 	// TODO: potential inf loop for
+		// corrupted input (connected)
 		if t.op[b] != FREE_LEFT {return}
 
 		t.op[c], t.op[b] = b, c
@@ -352,9 +358,9 @@ decode_geometry :: proc(ds: ^Decoder_State, c: ct.Corner) {
 				t.pos[v] = ds.vtx_codec.decode_tip(vertex_codec_context(t^, c), read_vertex(ds))
 			} else { 	// initial triangle
 				log.debug("initial triangle")
-				gs_c := ct.prev(c)
-				gs_v := ct.c2v(t^, gs_c)
-				t.pos[v] = ds.vtx_codec.decode_loop(t.pos[gs_v], read_vertex(ds))
+				ge_c := ct.prev(c)
+				ge_v := ct.c2v(t^, ge_c)
+				t.pos[v] = ds.vtx_codec.decode_loop(t.pos[ge_v], read_vertex(ds))
 			}
 
 			ds.vertex_done[v] = true
@@ -371,6 +377,7 @@ decode_geometry :: proc(ds: ^Decoder_State, c: ct.Corner) {
 			return c == ct.INVALID_CORNER || ds.tri_done[ct.c2t(c)]
 		}
 
+		// TODO: use stack again
 		right_done := is_done(ds, ct.right_of(t^, c))
 		left_done := is_done(ds, ct.left_of(t^, c))
 		switch {
