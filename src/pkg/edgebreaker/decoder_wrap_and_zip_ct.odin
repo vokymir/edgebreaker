@@ -123,7 +123,12 @@ decode_wrap_and_zip_ct :: proc(
 
 	log.debug(t)
 	resize(&t.v2c, len(t.pos), loc)
-	for c in 0 ..< len(t.c2v) {t.v2c[t.c2v[c]] = ct.Corner(c)}
+	slice.fill(t.v2c[:], ct.INVALID_CORNER)
+	for c in 0 ..< len(t.c2v) {
+		assert(t.c2v[c] != ct.INVALID_VERTEX, "unresolved corner")
+		t.v2c[t.c2v[c]] = ct.Corner(c)
+	}
+	for v in 0 ..< len(t.v2c) {assert(t.v2c[v] != ct.INVALID_CORNER, "unresolved vertex")}
 
 	log.debug(ds)
 	// pass 2: geometry
@@ -361,8 +366,13 @@ decode_geometry :: proc(ds: ^Decoder_State, c: ct.Corner) {
 			continue
 		}
 
-		right_done := ds.tri_done[ct.c2t(ct.right_of(t^, c))]
-		left_done := ds.tri_done[ct.c2t(ct.left_of(t^, c))]
+		// TODO: extract out of this proc
+		is_done :: proc(ds: ^Decoder_State, c: ct.Corner) -> bool {
+			return c == ct.INVALID_CORNER || ds.tri_done[ct.c2t(c)]
+		}
+
+		right_done := is_done(ds, ct.right_of(t^, c))
+		left_done := is_done(ds, ct.left_of(t^, c))
 		switch {
 		case right_done && left_done:
 			log.debug("E")
