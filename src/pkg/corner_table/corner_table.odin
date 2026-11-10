@@ -101,7 +101,7 @@ op :: #force_inline proc(t: Corner_Table, c: Corner) -> Corner {
 left :: #force_inline proc(t: Corner_Table, c: Corner) -> Corner {
 	p := prev(c)
 	o := op(t, p)
-	if (o == INVALID_CORNER) {
+	if (o < 0) {
 		return INVALID_CORNER
 	}
 	return prev(o)
@@ -112,7 +112,7 @@ left :: #force_inline proc(t: Corner_Table, c: Corner) -> Corner {
 right :: #force_inline proc(t: Corner_Table, c: Corner) -> Corner {
 	n := next(c)
 	o := op(t, n)
-	if (o == INVALID_CORNER) {
+	if (o < 0) {
 		return INVALID_CORNER
 	}
 	return next(o)
@@ -276,9 +276,11 @@ set_ring :: proc(t: ^Corner_Table, c: Corner, v: Vertex) {
 
 	start, has_border := rightmost(t^, c)
 	if !has_border {start = c}
+	log.debug(t)
 
 	curr := start
 	for {
+		log.debug(curr)
 		t.c2v[curr] = v
 
 		next := left(t^, curr)
@@ -291,6 +293,7 @@ set_ring :: proc(t: ^Corner_Table, c: Corner, v: Vertex) {
 Set border vertices to start from initial and increase by one each step.
 */
 set_border :: proc(t: ^Corner_Table, c: Corner, initial: Vertex) {
+	log.debug("setting border: c,initial_v", c, initial)
 	current := c
 	v := initial
 
@@ -299,7 +302,7 @@ set_border :: proc(t: ^Corner_Table, c: Corner, initial: Vertex) {
 		next, found := next_on_border(t^, current)
 		v += 1
 
-		if !found || next == c {break}
+		if !found || c2v(t^, next) == initial {break}
 		current = next
 	}
 }
@@ -308,8 +311,10 @@ set_border :: proc(t: ^Corner_Table, c: Corner, initial: Vertex) {
 Return the rightmost corner of vertex. If not border, border is false
 */
 rightmost :: proc(t: Corner_Table, c: Corner) -> (r: Corner, border: bool) {
+	log.debug("rightmost for", c)
 	cur := c
 	for {
+		log.debug(cur)
 		n := right(t, cur)
 		if n == INVALID_CORNER {return cur, true}
 		if n == c {return c, false}
