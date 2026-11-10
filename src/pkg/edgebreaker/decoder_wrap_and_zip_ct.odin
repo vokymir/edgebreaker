@@ -228,6 +228,7 @@ decode_connectivity :: proc(ds: ^Decoder_State, c: ct.Corner) {
 			if t.op[left_edge] == FREE_RIGHT {zip(ds, left_edge)}
 			c = pop_unvisited(ds)
 		}
+		assert(!is_linked(t.op[c]) || c == ct.INVALID_CORNER, "enc/dec mismatch in triangles done")
 
 		if c == ct.INVALID_CORNER {break}
 	}
