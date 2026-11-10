@@ -254,7 +254,7 @@ check_handles :: proc(es: ^Encoder_State_CT, t: ct.Corner_Table, gate: ct.Corner
 		if es.em.symbols[n_step - 1] != .S {continue}
 
 		// reached an S triangle from the side: this can only be its left edge
-		s_step := n_step - 1 // TODO: why -1???
+		s_step := n_step - 1 // step==0 means never visited, therefore here -1
 		arrival := step
 		hole_len := es.hole_len_of_s[n_step - 1] // 0 if absent
 
