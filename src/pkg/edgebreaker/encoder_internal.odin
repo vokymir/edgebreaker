@@ -695,9 +695,9 @@ assert_nice_mesh :: proc(
 ) {
 	r := diagnose_mesh(t, allocator, loc)
 
-	assert(r.same_dir == 0, "Mesh contains non-orientable faces.", loc)
-
 	assert(r.over_shared == 0, "Mesh contains non-manifold edges.", loc)
+
+	assert(r.same_dir == 0, "Mesh contains non-orientable faces.", loc)
 
 	assert(r.unreferenced == 0, "Mesh contains unreferenced vertices.", loc)
 }
