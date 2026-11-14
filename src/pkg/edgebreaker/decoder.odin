@@ -18,6 +18,6 @@ decode :: proc(
 	case .Wrap_And_Zip:
 		decode_wrap_and_zip(em, t, allocator, loc)
 	case .Spirale_Reversi:
-		panic("not implemented yet")
+		decode_spirale_reversi(em, t, allocator, loc)
 	}
 }
