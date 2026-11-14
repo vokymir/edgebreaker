@@ -88,7 +88,7 @@ validate_options :: proc(opt: ^Options) -> Error {
 		dir := filepath.dir(opt.input) // may alias opt.input, do not delete
 
 		name := strings.concatenate(
-			{filepath.stem(opt.input), format_info(inp_info.default_pair).extension},
+			{filepath.short_stem(opt.input), format_info(inp_info.default_pair).extension},
 		)
 		defer delete(name)
 
@@ -98,7 +98,7 @@ validate_options :: proc(opt: ^Options) -> Error {
 
 	output_format, out_ok := format_from_filename(opt.output)
 	if !out_ok {
-		fmt.print("invalid output file format")
+		fmt.print("invalid output file format", output_format, opt.output)
 		return .INVALID_OUTPUT_FILE_COMPLETELY
 	}
 	out_info := format_info(output_format)
@@ -137,7 +137,11 @@ handle_encode :: proc(opt: Options) -> Error {
 }
 
 handle_decode :: proc(opt: Options) -> Error {
-	em := eb.read(opt.input)
+	em, ok := eb.read(opt.input)
+	if !ok {
+		log.fatal("cannot load file", opt.input)
+		return .CANNOT_LOAD_FILE
+	}
 
 	table: ct.Corner_Table
 	ct.init(&table)
@@ -145,7 +149,7 @@ handle_decode :: proc(opt: Options) -> Error {
 
 	eb.decode(em^, &table)
 
-	ok := ct.save(table, opt.output)
+	ok = ct.save(table, opt.output)
 	if !ok {
 		log.fatal("failed write to file", opt.output)
 		return .FAILED_WRITE
