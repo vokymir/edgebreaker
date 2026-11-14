@@ -97,7 +97,6 @@ compress_internal :: proc(
 	ok := false,
 	em: ^Encoded_Mesh,
 ) {
-	log.debug(t.pos)
 	assert_nice_mesh(t, allocator, loc)
 
 	es: Encoder_State
@@ -436,7 +435,6 @@ tri_visited :: #force_inline proc(es: Encoder_State, c: ct.Corner) -> bool {
 emit_symbol :: #force_inline proc(es: ^Encoder_State, symbol: Operation, loc := #caller_location) {
 	append(&es.em.symbols, symbol)
 	log.debug("emitted symbol", symbol, location = loc)
-	log.debug(es.vertex_marks, location = loc)
 }
 
 emit_vertex :: #force_inline proc(
@@ -498,7 +496,6 @@ next_component :: proc(
 	start := start
 	marks := es.vertex_marks
 
-	log.debug(marks)
 	if search_first_holes {
 		for mark, i in marks[start:] {
 			if mark == .HOLE {

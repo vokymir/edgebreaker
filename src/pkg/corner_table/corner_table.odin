@@ -1,5 +1,6 @@
 package corner_table
 
+import "core:fmt"
 import "core:log"
 Vec3 :: [3]f32
 
@@ -220,7 +221,6 @@ corner (counter-clockwise)
 */
 v2c_right_border :: proc(t: Corner_Table, v: Vertex) -> (c := INVALID_CORNER, found := false) {
 	log.debug("v =", v)
-	log.debug(t)
 	initial := v2c(t, v)
 	log.debug("initial = ", initial)
 	if initial < 0 {return}
@@ -276,11 +276,9 @@ set_ring :: proc(t: ^Corner_Table, c: Corner, v: Vertex) {
 
 	start, has_border := rightmost(t^, c)
 	if !has_border {start = c}
-	log.debug(t)
 
 	curr := start
 	for {
-		log.debug(curr)
 		t.c2v[curr] = v
 
 		next := left(t^, curr)
@@ -306,20 +304,21 @@ set_border :: proc(t: ^Corner_Table, c: Corner, initial: Vertex, count: int) {
 	}
 	r0, _ := rightmost(t^, c)
 	r1, _ := rightmost(t^, current)
-	assert(r0 == r1, "border walk must be closed")
+	assert(
+		r0 == r1,
+		fmt.tprintf("border walk must be closed, v0 = %v, v1 = %v", t.c2v[r0], t.c2v[r1]),
+	)
 }
 
 /*
 Return the rightmost corner of vertex. If not border, border is false
 */
 rightmost :: proc(t: Corner_Table, c: Corner) -> (r: Corner, border: bool) {
-	log.debug("rightmost for", c)
-	cur := c
+	curr := c
 	for {
-		log.debug(cur)
-		n := right(t, cur)
-		if n < 0 {return cur, true}
-		if n == c {return c, false}
-		cur = n
+		n := right(t, curr)
+		if n < 0 {log.debug("c:", c, "->", curr, "[border]"); return curr, true}
+		if n == c {log.debug("c:", c, "[inside]"); return c, false}
+		curr = n
 	}
 }
