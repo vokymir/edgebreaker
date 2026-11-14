@@ -197,7 +197,20 @@ decode_component_connectivity :: proc(ds: ^Decoder_State, comp: Component_Info) 
 	first_tri := int(ds.last_tri + 1)
 	decode_component_triangles(ds, start)
 	last_tri := int(ds.last_tri + 1)
-
+	// zip_sweep :: proc(ds: ^Decoder_State, first_tri, last_tri: int) {
+	// 	t := ds.t
+	// 	for progress := true; progress; {
+	// 		progress = false
+	// 		for i in 3 * first_tri ..< 3 * last_tri {
+	// 			c := ct.Corner(i)
+	// 			if t.op[c] == FREE_RIGHT {
+	// 				zip(ds, c)
+	// 				if t.op[c] != FREE_RIGHT {progress = true}
+	// 			}
+	// 		}
+	// 	}
+	// }
+	// zip_sweep(ds, first_tri, last_tri)
 	assert_border_edges(ds^, comp, first_tri, last_tri)
 
 	finish_component(ds, start, first_vertex, comp)
@@ -342,6 +355,7 @@ apply_E :: proc(ds: ^Decoder_State, tip: ct.Corner) -> ct.Corner {
 	set_free(ds.t, right_edge(tip), FREE_RIGHT)
 	set_free(ds.t, left_edge(tip), FREE_RIGHT)
 	zip_if_free_right(ds, left_edge(tip))
+	zip_if_free_right(ds, right_edge(tip))
 	return pop_unlinked_gate(ds)
 }
 
@@ -391,6 +405,9 @@ glue_side :: proc(ds: ^Decoder_State, corner: ct.Corner) {
 
 	unify_vertices(t, next(corner), prev(s_left))
 	unify_vertices(t, prev(corner), next(s_left))
+
+	zippi := zip_next(t^, ct.INVALID_CORNER, corner)
+	zip_if_free_right(ds, zippi)
 }
 
 /*
@@ -462,6 +479,7 @@ Find first corner on vertex_of(c) which isn't linked.
 zip_pair :: proc(t: ct.Corner_Table, c: ct.Corner) -> ct.Corner {
 	b := next(c)
 
+	// go around the common vertex and find the opposite corner
 	for steps := 0; exist(t.op[b]); steps += 1 {
 		assert(steps < len(t.op), "zip: endless walk (corrupted input?)")
 		b = next(t.op[b])
