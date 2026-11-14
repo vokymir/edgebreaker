@@ -306,7 +306,13 @@ set_border :: proc(t: ^Corner_Table, c: Corner, initial: Vertex, count: int) {
 	r1, _ := rightmost(t^, current)
 	assert(
 		r0 == r1,
-		fmt.tprintf("border walk must be closed, v0 = %v, v1 = %v", t.c2v[r0], t.c2v[r1]),
+		fmt.tprintf(
+			"border walk must be closed, v0 = %v, v1 = %v, c0 = %v, c1 = %v",
+			t.c2v[r0],
+			t.c2v[r1],
+			c,
+			current,
+		),
 	)
 }
 
