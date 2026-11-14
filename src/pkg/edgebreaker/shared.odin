@@ -103,6 +103,7 @@ destroy_em :: proc(em: ^Encoded_Mesh, loc := #caller_location) {
 	delete(em.vertices, loc)
 	delete(em.topology, loc)
 	delete(em.components, loc)
+	free(em)
 }
 
 /********************************** PROCEDURES ********************************/

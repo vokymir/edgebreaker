@@ -99,8 +99,8 @@ compress_internal :: proc(
 	allocator := context.allocator,
 	loc := #caller_location,
 ) -> (
-	ok := false,
 	em: ^Encoded_Mesh,
+	ok := false,
 ) {
 	assert_nice_mesh(t, allocator, loc)
 
@@ -112,6 +112,7 @@ compress_internal :: proc(
 	init_em(em, len(t.c2v) / 3, len(t.pos), allocator, loc)
 	em.vertex_codec = es.vertex_codec.kind
 	es.em = em
+	// TODO: causes leak (the tri_map)
 	em.debug.original = t // TODO: debug
 	em.debug.tri_map = make([]int, len(t.c2v) / 3, allocator, loc) // TODO: debug
 
@@ -141,7 +142,7 @@ compress_internal :: proc(
 	}
 
 	assert(len(em.symbols) == len(t.c2v) / 3, "not one symbol per triangle")
-	return true, em
+	return em, true
 }
 
 /*

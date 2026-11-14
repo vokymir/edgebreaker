@@ -199,6 +199,7 @@ Returns:
 @(private = "file")
 parse_face_vertex :: proc(str: string) -> (v: Vertex, ok := false) {
 	tokens := strings.split(str, "/")
+	defer delete(tokens)
 	if len(tokens) == 0 || len(tokens[0]) == 0 {
 		log.debug("too few tokens")
 		return

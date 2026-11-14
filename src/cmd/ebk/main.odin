@@ -37,8 +37,14 @@ Options :: struct {
 
 main :: proc() {
 	context.logger = log.create_console_logger()
+	defer log.destroy_console_logger(context.logger)
 	opt: Options
 	flags.parse_or_exit(&opt, os.args)
+
+	output_allocated := opt.output == "" // validate_options will allocate it
+	defer if output_allocated {
+		delete(opt.output)
+	}
 
 	err := validate_options(&opt)
 	if err == .DONE {
@@ -72,29 +78,32 @@ validate_options :: proc(opt: ^Options) -> Error {
 	}
 
 	input_format, inp_ok := format_from_filename(opt.input)
-	i_info := format_info(input_format)
-
 	if !inp_ok { 	// unsupported input file
 		fmt.print("invalid input file format")
 		return .INVALID_INPUT_FILE
 	}
+	inp_info := format_info(input_format)
 
-	if opt.output == "" { 	// set default output path
-		opt.output = strings.concatenate(
-			{filepath.stem(opt.input), format_info(i_info.default_pair).extension},
-			context.allocator,
+	if opt.output == "" { 	// set default output path next to the input file
+		dir := filepath.dir(opt.input) // may alias opt.input, do not delete
+
+		name := strings.concatenate(
+			{filepath.stem(opt.input), format_info(inp_info.default_pair).extension},
 		)
+		defer delete(name)
+
+		p, _ := filepath.join({dir, name}) // allocates its own result
+		opt.output = p
 	}
 
 	output_format, out_ok := format_from_filename(opt.output)
-	o_info := format_info(output_format)
-
 	if !out_ok {
 		fmt.print("invalid output file format")
 		return .INVALID_OUTPUT_FILE_COMPLETELY
 	}
+	out_info := format_info(output_format)
 
-	if i_info.operation_encode == o_info.operation_encode {
+	if inp_info.operation_encode == out_info.operation_encode {
 		fmt.print("input file cannot be converted to specified output file")
 		return .INVALID_OUTPUT_FILE_FOR_INPUT_FILE
 	}
@@ -117,8 +126,7 @@ handle_encode :: proc(opt: Options) -> Error {
 		log.fatal("compression failed")
 		return .COMPRESSION_FAILED
 	}
-	defer free(em) // runs second
-	defer eb.destroy_em(em) // runs first
+	defer eb.destroy_em(em)
 
 	if !eb.write(em^, opt.output) {
 		log.fatal("failed write to file", opt.output)
