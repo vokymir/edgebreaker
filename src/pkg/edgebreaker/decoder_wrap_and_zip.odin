@@ -60,9 +60,6 @@ Decoder_State :: struct {
 	vertex_done:   []bool,
 	tri_done:      []bool,
 	vtx_codec:     Vertex_Codec,
-
-	// TODO: debug
-	debug:         Encoded_Mesh,
 }
 
 init_ds :: proc(
@@ -97,8 +94,6 @@ init_ds :: proc(
 		vertex_done   = make([]bool, n_vertices, allocator, loc),
 		tri_done      = make([]bool, n_triangles, allocator, loc),
 		vtx_codec     = vertex_codec_of(em.vertex_codec),
-		// TODO: debug
-		debug         = em,
 	}
 
 	prepare_topology_lookups(ds, em.topology[:])
@@ -197,23 +192,10 @@ decode_component_connectivity :: proc(ds: ^Decoder_State, comp: Component_Info) 
 	first_tri := int(ds.last_tri + 1)
 	decode_component_triangles(ds, start)
 	last_tri := int(ds.last_tri + 1)
-	// zip_sweep :: proc(ds: ^Decoder_State, first_tri, last_tri: int) {
-	// 	t := ds.t
-	// 	for progress := true; progress; {
-	// 		progress = false
-	// 		for i in 3 * first_tri ..< 3 * last_tri {
-	// 			c := ct.Corner(i)
-	// 			if t.op[c] == FREE_RIGHT {
-	// 				zip(ds, c)
-	// 				if t.op[c] != FREE_RIGHT {progress = true}
-	// 			}
-	// 		}
-	// 	}
-	// }
-	// zip_sweep(ds, first_tri, last_tri)
-	assert_border_edges(ds^, comp, first_tri, last_tri)
 
+	assert_border_edges_count(ds^, comp, first_tri, last_tri)
 	finish_component(ds, start, first_vertex, comp)
+
 	return start
 }
 
@@ -352,10 +334,12 @@ apply_S :: proc(ds: ^Decoder_State, tip: ct.Corner) -> ct.Corner {
 }
 // end: close sides, zip, pop gate_stack
 apply_E :: proc(ds: ^Decoder_State, tip: ct.Corner) -> ct.Corner {
-	set_free(ds.t, right_edge(tip), FREE_RIGHT)
-	set_free(ds.t, left_edge(tip), FREE_RIGHT)
-	zip_if_free_right(ds, left_edge(tip))
-	zip_if_free_right(ds, right_edge(tip))
+	l := left_edge(tip)
+	r := right_edge(tip)
+	set_free(ds.t, r, FREE_RIGHT)
+	set_free(ds.t, l, FREE_RIGHT)
+	zip_if_free_right(ds, l) // might be no-op if was previously glued
+	zip_if_free_right(ds, r) // might be no-op if l was zipped
 	return pop_unlinked_gate(ds)
 }
 
@@ -371,7 +355,7 @@ set_free :: proc(t: ^ct.Corner_Table, edge, mark: ct.Corner) {
 /*
 Check everything:
 a) is a hole? if so, reserve
-b) is arrival? if so, link
+b) is arrival? if so, glue & try zip
 */
 glue_triangle :: proc(ds: ^Decoder_State, tip: ct.Corner) {
 	reserve_hole_vertices(ds, tip)
@@ -392,7 +376,7 @@ reserve_hole_vertices :: proc(ds: ^Decoder_State, tip: ct.Corner) {
 }
 
 /*
-If corner is arrival corner, link it.
+If corner is arrival corner, glue it - and try to zip.
 */
 glue_side :: proc(ds: ^Decoder_State, corner: ct.Corner) {
 	t := ds.t
@@ -431,8 +415,6 @@ finish_component :: proc(
 	first_vertex: ct.Vertex,
 	comp: Component_Info,
 ) {
-	assert_loop_lengths(ds^, start)
-
 	for h in ds.pending_holes {
 		set_border(ds.t, h.tip, h.first, h.len)
 	}
@@ -759,8 +741,6 @@ Set all corners around v to have its c2v point to v. The corner c must be
 adjacent to vertex v.
 */
 set_ring :: proc(t: ^ct.Corner_Table, c: ct.Corner, v: ct.Vertex) {
-	// log.debug("set ring for c,v:", c, v)
-
 	start, has_border := ct.rightmost(t^, c)
 	if !has_border {start = c}
 
@@ -778,7 +758,6 @@ set_ring :: proc(t: ^ct.Corner_Table, c: ct.Corner, v: ct.Vertex) {
 Set border vertices to start from initial and increase by one each step.
 */
 set_border :: proc(t: ^ct.Corner_Table, c: ct.Corner, initial: ct.Vertex, count: int) {
-	// log.debug("setting border: c,initial_v", c, initial)
 	current := c
 
 	for i in 0 ..< count {
@@ -789,21 +768,10 @@ set_border :: proc(t: ^ct.Corner_Table, c: ct.Corner, initial: ct.Vertex, count:
 
 		current = next
 	}
+
 	r0, _ := ct.rightmost(t^, c)
 	r1, _ := ct.rightmost(t^, current)
-	{
-		border_loop_len :: proc(t: ct.Corner_Table, c: ct.Corner, limit: int) -> int {
-			cur := c
-			for n in 1 ..= limit {
-				next, found := ct.next_on_border(t, cur)
-				if !found {return -n} 	// walk fell off the border
-				cur = next
-				if cur == c {return n}
-			}
-			return -1 // never closed within limit
-		}
-		fmt.printfln("loop len: %v, count: %v", border_loop_len(t^, c, len(t.op)), count)
-	}
+
 	assert(
 		r0 == r1,
 		fmt.tprintf(
@@ -817,68 +785,25 @@ set_border :: proc(t: ^ct.Corner_Table, c: ct.Corner, initial: ct.Vertex, count:
 }
 
 /*
-TODO: generated, WIP, not assert only debug outputs
-*/
-assert_loop_lengths :: proc(ds: Decoder_State, start: ct.Corner) {
-	for h in ds.pending_holes {
-		free_l, free_r, invalid := 0, 0, 0
-		for c in int(start) ..< 3 * (int(ds.last_tri) + 1) {
-			switch ds.t.op[c] {
-			case FREE_LEFT:
-				free_l += 1
-			case FREE_RIGHT:
-				free_r += 1
-			case ct.INVALID_CORNER:
-				invalid += 1
-			}
-		}
-		log.debugf(
-			"finish: free_l=%v free_r=%v invalid=%v expected_border=%v",
-			free_l,
-			free_r,
-			invalid,
-			h.len,
-		)
-
-		seen := make([]bool, len(ds.t.op), context.temp_allocator)
-		for c in int(start) ..< 3 * (int(ds.last_tri) + 1) {
-			if ds.t.op[c] >= 0 || seen[c] {continue}
-			n := 0
-			cur := ct.Corner(c)
-			for {
-				seen[cur] = true
-				n += 1
-				nxt, found := ct.next_on_border(ds.t^, cur)
-				if !found || seen[nxt] {break}
-				cur = nxt
-			}
-			tri := ds.debug.debug.tri_map[c / 3]
-			log.debugf(
-				"border loop through corner %v (step %v): len %v, ORIG TRI: %v",
-				c,
-				c / 3,
-				n,
-				tri,
-			)
-		}
-	}
-}
-
-/*
 After component is done, assert that it has as many border edges as it should
 (known in component info).
 */
-assert_border_edges :: proc(ds: Decoder_State, comp: Component_Info, first_tri, last_tri: int) {
-	// Expected number of boundary edges.
+@(disabled = ODIN_DISABLE_ASSERT)
+assert_border_edges_count :: proc(
+	ds: Decoder_State,
+	comp: Component_Info,
+	first_tri, last_tri: int,
+) {
 	expected := comp.outer_boundary
 	for h in ds.pending_holes {
 		expected += h.len
 	}
 
-	// Count all unlinked edges in this component.
+	// count all boundary edges = nonexistent opposite corners
 	actual := 0
 	for i in 3 * first_tri ..< 3 * last_tri {
-		if ds.t.op[ct.Corner(i)] < 0 {
+		op := ds.t.op[ct.Corner(i)]
+		if !exist(op) {
 			actual += 1
 		}
 	}
