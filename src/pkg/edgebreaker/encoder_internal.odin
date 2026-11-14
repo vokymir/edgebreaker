@@ -108,6 +108,7 @@ compress_internal :: proc(
 	em.vertex_codec = es.vertex_codec.kind
 	es.em = em
 	em.debug.original = t // TODO: debug
+	em.debug.tri_map = make([]int, len(t.c2v) / 3, allocator, loc) // TODO: debug
 
 	mark_all_holes(&es, t)
 
@@ -135,7 +136,6 @@ compress_internal :: proc(
 	}
 
 	assert(len(em.symbols) == len(t.c2v) / 3, "not one symbol per triangle")
-	em.debug.tri_map = es.tri_step
 	return true, em
 }
 
@@ -423,6 +423,7 @@ tri_step :: #force_inline proc(
 	loc := #caller_location,
 ) {
 	es.tri_step[ct.c2t(gate)] = step
+	es.em.debug.tri_map[step - 1] = int(ct.c2t(gate)) // TODO: debug
 	log.debug("triangle", ct.c2t(gate), "step set to", step, location = loc)
 }
 

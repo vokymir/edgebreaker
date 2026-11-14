@@ -51,7 +51,7 @@ Encoded_Mesh :: struct {
 
 Debug_Struct :: struct {
 	original: ct.Corner_Table,
-	tri_map:  []int, // map original triangles to encoded + 1
+	tri_map:  []int, // map step to original triangles
 }
 
 /*
