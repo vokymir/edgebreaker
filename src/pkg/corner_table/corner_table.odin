@@ -1,6 +1,5 @@
 package corner_table
 
-import "core:fmt"
 import "core:log"
 Vec3 :: [3]f32
 
@@ -220,9 +219,9 @@ corner (counter-clockwise)
 - found: if not on boundary, return false
 */
 v2c_right_border :: proc(t: Corner_Table, v: Vertex) -> (c := INVALID_CORNER, found := false) {
-	log.debug("v =", v)
+	// log.debug("v =", v)
 	initial := v2c(t, v)
-	log.debug("initial = ", initial)
+	// log.debug("initial = ", initial)
 	if initial < 0 {return}
 	current := initial
 	next := current
@@ -268,63 +267,20 @@ next_on_border :: proc(t: Corner_Table, c: Corner) -> (cb := INVALID_CORNER, fou
 }
 
 /*
-Set all corners around v to have its c2v point to v. The corner c must be
-adjacent to vertex v.
-*/
-set_ring :: proc(t: ^Corner_Table, c: Corner, v: Vertex) {
-	log.debug("set ring for c,v:", c, v)
-
-	start, has_border := rightmost(t^, c)
-	if !has_border {start = c}
-
-	curr := start
-	for {
-		t.c2v[curr] = v
-
-		next := left(t^, curr)
-		if next == start || next < 0 {break} 	// done full circle
-		curr = next
-	}
-}
-
-/*
-Set border vertices to start from initial and increase by one each step.
-*/
-set_border :: proc(t: ^Corner_Table, c: Corner, initial: Vertex, count: int) {
-	log.debug("setting border: c,initial_v", c, initial)
-	current := c
-
-	for i in 0 ..< count {
-		set_ring(t, current, initial + Vertex(i))
-
-		next, found := next_on_border(t^, current)
-		assert(found, "border walk")
-
-		current = next
-	}
-	r0, _ := rightmost(t^, c)
-	r1, _ := rightmost(t^, current)
-	assert(
-		r0 == r1,
-		fmt.tprintf(
-			"border walk must be closed, v0 = %v, v1 = %v, c0 = %v, c1 = %v",
-			t.c2v[r0],
-			t.c2v[r1],
-			c,
-			current,
-		),
-	)
-}
-
-/*
 Return the rightmost corner of vertex. If not border, border is false
 */
 rightmost :: proc(t: Corner_Table, c: Corner) -> (r: Corner, border: bool) {
 	curr := c
 	for {
 		n := right(t, curr)
-		if n < 0 {log.debug("c:", c, "->", curr, "[border]"); return curr, true}
-		if n == c {log.debug("c:", c, "[inside]"); return c, false}
+		if n < 0 {
+			// log.debug("c:", c, "->", curr, "[border]")
+			return curr, true
+		}
+		if n == c {
+			log.debug("c:", c, "[inside]")
+			return c, false
+		}
 		curr = n
 	}
 }
