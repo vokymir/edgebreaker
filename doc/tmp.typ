@@ -15,4 +15,6 @@ holes and handles (genus > 0) it is better to use triangle-marks and that it is
 even simpler that original boundary approach
 last commit with explicit boundary: d68b38456ab3cb26135065d7a407bd97de3f1fd4
 
-3. ???
+3. decoder wrap&zip
+what went wrong: forgot to zip after glue, took half a day to find
+fix commit: 1851051097161e8cc8c3e2859a0f3b8016778ce6
