@@ -258,7 +258,7 @@ decode_component_triangles :: proc(ds: ^Decoder_State, start: ct.Corner) {
 		edge := apply_symbol(ds, tip, symbol)
 		if edge == ct.INVALID_CORNER {return} 	// finished component
 
-		assert(!is_linked(ds.t.op[edge]), "enc/dec mismatch: next gate is already linked")
+		assert(!exist(ds.t.op[edge]), "enc/dec mismatch: next gate is already linked")
 		tip = attach_triangle(ds, edge)
 	}
 }
@@ -339,7 +339,7 @@ apply_E :: proc(ds: ^Decoder_State, tip: ct.Corner) -> ct.Corner {
 Mark edge as free ONLY if it isn't already linked.
 */
 set_free :: proc(t: ^ct.Corner_Table, edge, mark: ct.Corner) {
-	if !is_linked(t.op[edge]) {t.op[edge] = mark}
+	if !exist(t.op[edge]) {t.op[edge] = mark}
 }
 
 /****************************** HOLES & HANDLES *******************************/
@@ -435,9 +435,9 @@ zip :: proc(ds: ^Decoder_State, c: ct.Corner) {
 		if t.op[b] != FREE_LEFT {return}
 
 		t.op[c], t.op[b] = b, c
-		relabel_fan(t, c, b)
+		relabel_fan(t, b, c)
 
-		c = zip_next(t^, c, b)
+		c = zip_next(t^, b, c)
 	}
 }
 
@@ -447,7 +447,7 @@ Find first corner on vertex_of(c) which isn't linked.
 zip_pair :: proc(t: ct.Corner_Table, c: ct.Corner) -> ct.Corner {
 	b := next(c)
 
-	for steps := 0; is_linked(t.op[b]); steps += 1 {
+	for steps := 0; exist(t.op[b]); steps += 1 {
 		assert(steps < len(t.op), "zip: endless walk (corrupted input?)")
 		b = next(t.op[b])
 	}
@@ -456,16 +456,16 @@ zip_pair :: proc(t: ct.Corner_Table, c: ct.Corner) -> ct.Corner {
 }
 
 /*
-Every corner in fan between must has vertex_of(b).
+Set every corner around vertex c2v[prev(b)] to has that vertex in c2v table.
 prev(b) must be the vertex v
 */
-relabel_fan :: proc(t: ^ct.Corner_Table, c, b: ct.Corner) {
+relabel_fan :: proc(t: ^ct.Corner_Table, b, c: ct.Corner) {
 	v := t.c2v[prev(b)]
 
 	a := prev(c)
 	t.c2v[prev(a)] = v
 
-	for steps := 0; is_linked(t.op[a]) && a != b; steps += 1 {
+	for steps := 0; exist(t.op[a]) && a != b; steps += 1 {
 		assert(steps < len(t.op), "zip: endless walk (corrupted input?)")
 		a = prev(t.op[a])
 		t.c2v[prev(a)] = v
@@ -476,10 +476,10 @@ relabel_fan :: proc(t: ^ct.Corner_Table, c, b: ct.Corner) {
 After c and b were linked, where to continue zipping?
 the free end on the other side of c
 */
-zip_next :: proc(t: ct.Corner_Table, c, b: ct.Corner) -> ct.Corner {
+zip_next :: proc(t: ct.Corner_Table, b, c: ct.Corner) -> ct.Corner {
 	c := prev(c)
 
-	for steps := 0; is_linked(t.op[c]) && c != b; steps += 1 {
+	for steps := 0; exist(t.op[c]) && c != b; steps += 1 {
 		assert(steps < len(t.op), "zip: endless walk (corrupted input?)")
 		c = prev(t.op[c])
 	}
@@ -652,7 +652,7 @@ decode_hole_vertices :: proc(ds: ^Decoder_State, c: ct.Corner) {
 
 /****************************** Helpers ***************************************/
 
-is_linked :: #force_inline proc(c: ct.Corner) -> bool {return c >= 0}
+exist :: #force_inline proc(c: ct.Corner) -> bool {return c >= 0}
 
 read_symbol :: proc(ds: ^Decoder_State) -> Operation {
 	assert(ds.sym_pos < len(ds.symbols), "ran out of symbols")
@@ -706,7 +706,7 @@ pop_unlinked_gate :: #force_inline proc(ds: ^Decoder_State) -> ct.Corner {
 	for len(ds.gate_stack) > 0 {
 		candidate := ct.Corner(pop(&ds.gate_stack))
 
-		if !is_linked(ds.t.op[candidate]) {return candidate}
+		if !exist(ds.t.op[candidate]) {return candidate}
 	}
 	return ct.INVALID_CORNER
 }
