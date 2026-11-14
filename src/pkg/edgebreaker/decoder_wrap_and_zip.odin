@@ -148,7 +148,7 @@ destroy_ds :: proc(ds: ^Decoder_State, loc := #caller_location) {
 /********************************** ENTRY *************************************/
 
 @(private)
-decode_wrap_and_zip_ct :: proc(
+decode_wrap_and_zip :: proc(
 	em: Encoded_Mesh,
 	t: ^ct.Corner_Table,
 	allocator := context.allocator,

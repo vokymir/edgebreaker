@@ -16,7 +16,7 @@ decode :: proc(
 ) {
 	switch type {
 	case .Wrap_And_Zip:
-		decode_wrap_and_zip_ct(em, t, allocator, loc)
+		decode_wrap_and_zip(em, t, allocator, loc)
 	case .Spirale_Reversi:
 		panic("not implemented yet")
 	}
