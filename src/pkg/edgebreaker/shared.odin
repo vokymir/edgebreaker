@@ -46,6 +46,12 @@ Encoded_Mesh :: struct {
 	vertices:     [dynamic]Vector3,
 	topology:     [dynamic]Topology_Entry,
 	components:   [dynamic]Component_Info,
+	debug:        Debug_Struct,
+}
+
+Debug_Struct :: struct {
+	original: ct.Corner_Table,
+	tri_map:  []int, // map original triangles to encoded + 1
 }
 
 /*
