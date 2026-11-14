@@ -278,7 +278,7 @@ rightmost :: proc(t: Corner_Table, c: Corner) -> (r: Corner, border: bool) {
 			return curr, true
 		}
 		if n == c {
-			log.debug("c:", c, "[inside]")
+			// log.debug("c:", c, "[inside]")
 			return c, false
 		}
 		curr = n
