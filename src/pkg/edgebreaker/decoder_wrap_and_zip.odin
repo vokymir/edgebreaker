@@ -443,10 +443,7 @@ zip :: proc(ds: ^Decoder_State, c: ct.Corner) {
 
 	for t.op[c] == FREE_RIGHT {
 		b := zip_pair(t^, c)
-		if t.op[b] != FREE_LEFT {
-			log.debugf("zip stop: step=%v c=%v b=%v op[b]=%v", c / 3, c, b, t.op[b])
-			return
-		}
+		if t.op[b] != FREE_LEFT {return}
 
 		t.op[c], t.op[b] = b, c
 		relabel_fan(t, b, c)
@@ -475,16 +472,13 @@ Set every corner around vertex c2v[prev(b)] to has that vertex in c2v table.
 prev(b) must be the vertex v
 */
 relabel_fan :: proc(t: ^ct.Corner_Table, b, c: ct.Corner) {
+	q := next(c)
 	v := t.c2v[prev(b)]
 
-	a := prev(c)
-	t.c2v[prev(a)] = v
+	if v == ct.INVALID_VERTEX {v = t.c2v[q]}
+	if v == ct.INVALID_VERTEX {return}
 
-	for steps := 0; exist(t.op[a]) && a != b; steps += 1 {
-		assert(steps < len(t.op), "zip: endless walk (corrupted input?)")
-		a = prev(t.op[a])
-		t.c2v[prev(a)] = v
-	}
+	set_ring(t, q, v)
 }
 
 /*
@@ -745,7 +739,8 @@ set_ring :: proc(t: ^ct.Corner_Table, c: ct.Corner, v: ct.Vertex) {
 	if !has_border {start = c}
 
 	curr := start
-	for {
+	for step := 0;; step += 1 {
+		assert(step < len(t.pos), "Neighbours of vertex must be less than total # of vertices.")
 		t.c2v[curr] = v
 
 		next := ct.left(t^, curr)
