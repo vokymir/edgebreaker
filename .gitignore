@@ -7,6 +7,9 @@
 !assets/**/*.obj
 
 # since I do not compile into build/ dir, I need to ignore all binaries
-ebk
-ebk-vis
-vibed-vis
+ebk/ebk
+ebk-vis/ebk-vis
+vibed-vis/vibed-vis
+
+# logs
+log*
