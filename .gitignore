@@ -1,0 +1,12 @@
+# all encoded files can be easily encoded again
+*.ebk 
+
+# any obj outside ./assets dir is irrelevant 
+*.obj
+!assets/*.obj
+!assets/**/*.obj
+
+# since I do not compile into build/ dir, I need to ignore all binaries
+ebk
+ebk-vis
+vibed-vis
