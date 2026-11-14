@@ -1,30 +1,17 @@
+#+private file
 package edgebreaker
 
 import "core:fmt"
 import "core:log"
 import "core:os"
-import "core:path/filepath"
 import "core:strings"
 
-// TODO: separe file with this public proc, then private file (private to
-// package) with impl.
-write :: proc(
-	em: Encoded_Mesh,
-	filename: string,
-	allocator := context.allocator,
-	loc := #caller_location,
-) -> bool {
-	switch filepath.long_ext(filename) {
-	case ".simple.ebk":
-		return write_file_simple(em, filename, allocator, loc)
-	case ".ebk":
-		return write_file_binary(em, filename)
-	case:
-		return false
-	}
+@(private)
+write_file_binary :: proc(em: Encoded_Mesh, filename: string) -> bool {
+	return false
 }
 
-@(private = "file")
+@(private)
 write_file_simple :: proc(
 	em: Encoded_Mesh,
 	filename: string,
@@ -72,9 +59,4 @@ write_file_simple :: proc(
 	}
 
 	return true
-}
-
-@(private = "file")
-write_file_binary :: proc(em: Encoded_Mesh, filename: string) -> bool {
-	return false
 }
