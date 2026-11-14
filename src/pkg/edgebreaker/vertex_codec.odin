@@ -5,10 +5,10 @@ import "core:log"
 
 Vector3 :: ct.Vec3
 
-/********************************* Possible predictors ************************/
+/********************************* Possible codecs ****************************/
 
 /*
-Given Predictor Kind create a predictor.
+Given Kind, create a struct.
 */
 vertex_codec_of :: proc(k: Vertex_Codec_Kind) -> Vertex_Codec {
 	switch k {
@@ -20,6 +20,9 @@ vertex_codec_of :: proc(k: Vertex_Codec_Kind) -> Vertex_Codec {
 	return Vertex_Codec_Raw
 }
 
+/*
+All vertices coded as raw positions.
+*/
 Vertex_Codec_Raw :: Vertex_Codec {
 	kind        = .RAW,
 	encode_tip  = raw_tip,
@@ -28,6 +31,10 @@ Vertex_Codec_Raw :: Vertex_Codec {
 	decode_loop = raw_loop,
 }
 
+/*
+Interior vertices coded with parallelogram,
+boundary vertices coded with delta.
+*/
 Vertex_Codec_Parallelogram :: Vertex_Codec {
 	kind        = .DELTA_PARALLELOGRAM,
 	encode_tip  = parallelogram_encode,
@@ -71,6 +78,10 @@ Vertex_Codec_Kind :: enum u8 {
 	DELTA_PARALLELOGRAM, // delta on loops, parallelogram on tips
 }
 
+/*
+Context of tip (gate corner). 
+SHOULD be created via corresponding procedure vertex_codec_context().
+*/
 Tip_Context :: struct {
 	gate_start, gate_end: Vector3,
 	opposite:             Vector3,
@@ -88,6 +99,8 @@ Vertex_Codec :: struct {
 
 /******************************* Implementations ******************************/
 
+/****** RAW ******/
+
 /*
 Always predict {0,0,0} therefore the correction/delta must be the absolute 
 vertex position.
@@ -102,6 +115,7 @@ raw_loop :: proc(_, pos: Vector3) -> Vector3 {
 	return pos
 }
 
+/****** BOUNDARY en/de coding ******/
 
 /*
 Delta encoding does simply only encode the difference (delta) between two
@@ -116,6 +130,8 @@ delta_encode :: proc(prev, pos: Vector3) -> Vector3 {
 delta_decode :: proc(prev, residual: Vector3) -> Vector3 {
 	return prev + residual
 }
+
+/****** INTERIOR en/de coding ******/
 
 /*
 C operation on any two triangles where gs/ge means gate start/end:
