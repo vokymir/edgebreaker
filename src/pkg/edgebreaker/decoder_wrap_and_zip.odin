@@ -3,20 +3,9 @@ package edgebreaker
 
 import ct "../corner_table"
 import "base:runtime"
-import "core:fmt"
 import "core:log"
-import "core:slice"
 
 /******************************* TYPES ****************************************/
-
-next :: ct.next
-prev :: ct.prev
-right_edge :: ct.next
-left_edge :: ct.prev
-
-// those assume tip given
-gate_start :: ct.next
-gate_end :: ct.prev
 
 /* 
 Temporary values for connectivity pass.
@@ -36,34 +25,25 @@ Pending_Hole :: struct {
 	len:   int, // #verts in hole
 }
 
-Decoder_State :: struct {
-	t:             ^ct.Corner_Table,
-	symbols:       []Operation,
-	vertices:      []Vector3,
-	allocator:     runtime.Allocator,
+Wrap_a_Zip_State :: struct {
+	//
+	using common:  Decoder_Common_State,
+	geometry:      Decoder_Geometry_State,
 
 	// lookups prepared from topology
 	holes:         map[ct.Corner]int, // map tip corner -> hole len
 	glues:         map[ct.Corner]ct.Corner, // map corner -> corner (arrival to S-left)
 
-	// both passes
-	gate_stack:    [dynamic]Gate,
-
 	// connectivity pass
+	gate_stack:    [dynamic]Gate,
 	sym_pos:       int,
 	last_tri:      ct.Triangle,
 	last_vertex:   ct.Vertex,
 	pending_holes: [dynamic]Pending_Hole,
-
-	// geometry pass
-	vtx_pos:       int,
-	vertex_done:   []bool,
-	tri_done:      []bool,
-	vtx_codec:     Vertex_Codec,
 }
 
-init_ds :: proc(
-	ds: ^Decoder_State,
+init_wz :: proc(
+	wz: ^Wrap_a_Zip_State,
 	em: Encoded_Mesh,
 	t: ^ct.Corner_Table,
 	allocator := context.allocator,
@@ -74,76 +54,46 @@ init_ds :: proc(
 
 	prepare_corner_table(t, n_vertices, n_triangles, loc)
 
-	ds^ = Decoder_State {
-		t             = t,
-		symbols       = em.symbols[:],
-		vertices      = em.vertices[:],
-		allocator     = allocator,
-		//
+	wz^ = Wrap_a_Zip_State {
 		holes         = make(map[ct.Corner]int, allocator, loc),
 		glues         = make(map[ct.Corner]ct.Corner, allocator, loc),
 		//
 		gate_stack    = make([dynamic]Gate, allocator, loc),
-		//
 		sym_pos       = 0,
 		last_tri      = ct.INVALID_TRIANGLE,
 		last_vertex   = ct.INVALID_VERTEX,
 		pending_holes = make([dynamic]Pending_Hole, allocator, loc),
-		//
-		vtx_pos       = 0,
-		vertex_done   = make([]bool, n_vertices, allocator, loc),
-		tri_done      = make([]bool, n_triangles, allocator, loc),
-		vtx_codec     = vertex_codec_of(em.vertex_codec),
 	}
 
-	prepare_topology_lookups(ds, em.topology[:])
-}
+	init_dcs(&wz.common, em, t, allocator)
+	init_dgs(&wz.geometry, n_vertices, n_triangles, em.vertex_codec, allocator, loc)
 
-/*
-Make some insides of corner table adequately sized.
-*/
-prepare_corner_table :: proc(
-	t: ^ct.Corner_Table,
-	n_vertices, n_triangles: int,
-	loc := #caller_location,
-) {
-	assert(len(t.pos) == 0, "not empty corner table")
-	assert(len(t.c2v) == 0, "not empty corner table")
-	assert(len(t.op) == 0, "not empty corner table")
-	assert(len(t.v2c) == 0, "not empty corner table")
-
-	resize(&t.pos, n_vertices, loc)
-	resize(&t.c2v, 3 * n_triangles, loc)
-	resize(&t.op, 3 * n_triangles, loc)
-	slice.fill(t.c2v[:], ct.INVALID_VERTEX)
-	slice.fill(t.op[:], ct.INVALID_CORNER)
+	prepare_topology_lookups(wz, em.topology[:])
 }
 
 /*
 Transform topology entries into maps for O(1) lookup time.
 */
-prepare_topology_lookups :: proc(ds: ^Decoder_State, topology: []Topology_Entry) {
+prepare_topology_lookups :: proc(wz: ^Wrap_a_Zip_State, topology: []Topology_Entry) {
 	for top in topology {
-		s_tip := ct.Corner(3 * top.s_step)
-		arrival_tip := ct.Corner(3 * top.arrival_step)
-		s_corner := side_corner(s_tip, .LEFT) // always left side
-		arrival_corner := side_corner(arrival_tip, top.arrival_side)
+		s, arrival := corners_from_topology(top)
 
-		ds.glues[arrival_corner] = s_corner
+		wz.glues[arrival] = s
 
 		if top.hole_len > 0 {
-			ds.holes[s_tip] = top.hole_len
+			s_tip := side_corner(s, .RIGHT)
+			wz.holes[s_tip] = top.hole_len
 		}
 	}
 }
 
-destroy_ds :: proc(ds: ^Decoder_State, loc := #caller_location) {
-	delete(ds.holes, loc)
-	delete(ds.glues, loc)
-	delete(ds.gate_stack, loc)
-	delete(ds.pending_holes, loc)
-	delete(ds.vertex_done, ds.allocator, loc)
-	delete(ds.tri_done, ds.allocator, loc)
+destroy_wz :: proc(wz: ^Wrap_a_Zip_State, loc := #caller_location) {
+	delete(wz.holes, loc)
+	delete(wz.glues, loc)
+	delete(wz.pending_holes, loc)
+
+	destroy_dcs(&wz.common, loc)
+	destroy_dgs(&wz.geometry, loc)
 }
 
 /********************************** ENTRY *************************************/
@@ -155,9 +105,9 @@ decode_wrap_and_zip :: proc(
 	allocator := context.allocator,
 	loc := #caller_location,
 ) {
-	ds: Decoder_State
-	init_ds(&ds, em, t, allocator, loc)
-	defer destroy_ds(&ds, loc)
+	wz: Wrap_a_Zip_State
+	init_wz(&wz, em, t, allocator, loc)
+	defer destroy_wz(&wz, loc)
 
 	// store component starts
 	starts := make([dynamic]ct.Corner, 0, len(em.components), allocator, loc)
@@ -165,19 +115,16 @@ decode_wrap_and_zip :: proc(
 
 	// pass 1: connectivity
 	for comp in em.components {
-		append(&starts, decode_component_connectivity(&ds, comp))
+		append(&starts, decode_component_connectivity(&wz, comp))
 	}
-	assert(ds.sym_pos == len(ds.symbols), "unused symbols")
-	assert(int(ds.last_vertex + 1) == len(em.vertices), "missing vertex")
+	assert(wz.sym_pos == len(wz.symbols), "unused symbols")
+	assert(int(wz.last_vertex + 1) == len(em.vertices), "missing vertex")
 
-	finalize_corner_table(&ds, loc)
+	finalize_corner_table(&wz, loc)
 	assert_corner_table_consistent(t^)
 
 	// pass 2: geometry
-	for comp, i in em.components {
-		decode_component_geometry(&ds, starts[i], comp)
-	}
-	assert(ds.vtx_pos == len(ds.vertices), "unused vertices")
+	decode_geometry(&wz.common, &wz.geometry, starts[:], em.components[:])
 }
 
 /******************************* PASS 1: CONNECTIVITY *************************/
@@ -186,15 +133,15 @@ decode_wrap_and_zip :: proc(
 Returns:
 - tip corner of first triangle
 */
-decode_component_connectivity :: proc(ds: ^Decoder_State, comp: Component_Info) -> ct.Corner {
-	start, first_vertex := begin_component(ds, comp)
+decode_component_connectivity :: proc(wz: ^Wrap_a_Zip_State, comp: Component_Info) -> ct.Corner {
+	start, first_vertex := begin_component(wz, comp)
 
-	first_tri := int(ds.last_tri + 1)
-	decode_component_triangles(ds, start)
-	last_tri := int(ds.last_tri + 1)
+	first_tri := int(wz.last_tri + 1)
+	decode_component_triangles(wz, start)
+	last_tri := int(wz.last_tri + 1)
 
-	assert_border_edges_count(ds^, comp, first_tri, last_tri)
-	finish_component(ds, start, first_vertex, comp)
+	assert_component_border_edges(wz^, first_tri, last_tri)
+	finish_component(wz, start, first_vertex, comp)
 
 	return start
 }
@@ -207,19 +154,19 @@ Returns:
 - first_vertex: id of gs (1st component vertex, absolute position)
 */
 begin_component :: proc(
-	ds: ^Decoder_State,
+	wz: ^Wrap_a_Zip_State,
 	comp: Component_Info,
 ) -> (
 	start: ct.Corner,
 	first_vertex: ct.Vertex,
 ) {
 	log.debug("begin component", comp)
-	start = peek_next_tip(ds^)
+	start = peek_next_tip(wz^)
 
 	if comp.outer_boundary > 0 { 	// BOUNDARY COMPONENT
-		first_vertex = begin_boundary_component(ds, start, comp.outer_boundary)
+		first_vertex = begin_boundary_component(wz, start, comp.outer_boundary)
 	} else { 	// CLOSED COMPONENT
-		first_vertex = begin_closed_component(ds, start)
+		first_vertex = begin_closed_component(wz, start)
 	}
 
 	return start, first_vertex
@@ -229,21 +176,25 @@ begin_component :: proc(
 reserve border vertex ids, process gs,ge
 the assigning of vertex ids is done in finish_component
 */
-begin_boundary_component :: proc(ds: ^Decoder_State, tip: ct.Corner, n_border: int) -> ct.Vertex {
-	first := reserve_vertex_ids(ds, n_border)
+begin_boundary_component :: proc(
+	wz: ^Wrap_a_Zip_State,
+	tip: ct.Corner,
+	n_border: int,
+) -> ct.Vertex {
+	first := reserve_vertex_ids(wz, n_border)
 
-	ds.t.c2v[gate_start(tip)] = first
-	ds.t.c2v[gate_end(tip)] = first + ct.Vertex(n_border - 1)
+	wz.t.c2v[gate_start(tip)] = first
+	wz.t.c2v[gate_end(tip)] = first + ct.Vertex(n_border - 1)
 
 	return first
 }
 
-begin_closed_component :: proc(ds: ^Decoder_State, tip: ct.Corner) -> ct.Vertex {
-	first := reserve_vertex_ids(ds, 2)
+begin_closed_component :: proc(wz: ^Wrap_a_Zip_State, tip: ct.Corner) -> ct.Vertex {
+	first := reserve_vertex_ids(wz, 2)
 
-	ds.t.c2v[gate_start(tip)] = first
-	ds.t.c2v[gate_end(tip)] = first + 1
-	ds.t.op[tip] = FREE_LEFT
+	wz.t.c2v[gate_start(tip)] = first
+	wz.t.c2v[gate_end(tip)] = first + 1
+	wz.t.op[tip] = FREE_LEFT
 
 	return first
 }
@@ -251,20 +202,20 @@ begin_closed_component :: proc(ds: ^Decoder_State, tip: ct.Corner) -> ct.Vertex 
 /*
 Main connectivity loop, iterates over triangles.
 */
-decode_component_triangles :: proc(ds: ^Decoder_State, start: ct.Corner) {
-	tip := new_triangle(ds) // initial triangle
+decode_component_triangles :: proc(wz: ^Wrap_a_Zip_State, start: ct.Corner) {
+	tip := new_triangle(wz) // initial triangle
 	assert(tip == start, "component must start on the next free triangle")
 
 	for {
 		// glue depends on triangle, not the symbol
-		glue_triangle(ds, tip)
+		glue_triangle(wz, tip)
 
-		symbol := read_symbol(ds)
-		edge := apply_symbol(ds, tip, symbol)
+		symbol := read_symbol(wz)
+		edge := apply_symbol(wz, tip, symbol)
 		if edge == ct.INVALID_CORNER {return} 	// finished component
 
-		assert(!exist(ds.t.op[edge]), "enc/dec mismatch: next gate is already linked")
-		tip = attach_triangle(ds, edge)
+		assert(!exist(wz.t.op[edge]), "enc/dec mismatch: next gate is already linked")
+		tip = attach_triangle(wz, edge)
 	}
 }
 
@@ -274,9 +225,9 @@ Create new triangle. It is attached to "edge".
 Returns:
 - tip: tip of the new triangle
 */
-attach_triangle :: proc(ds: ^Decoder_State, edge: ct.Corner) -> (tip: ct.Corner) {
-	t := ds.t
-	tip = new_triangle(ds)
+attach_triangle :: proc(wz: ^Wrap_a_Zip_State, edge: ct.Corner) -> (tip: ct.Corner) {
+	t := wz.t
+	tip = new_triangle(wz)
 
 	t.op[edge] = tip
 	t.op[tip] = edge
@@ -294,53 +245,59 @@ Returns:
 - edge: corner which the next triangle should be attached to
   INVALID_CORNER = component is finished
 */
-apply_symbol :: proc(ds: ^Decoder_State, tip: ct.Corner, symbol: Operation) -> (edge: ct.Corner) {
+apply_symbol :: proc(
+	wz: ^Wrap_a_Zip_State,
+	tip: ct.Corner,
+	symbol: Operation,
+) -> (
+	edge: ct.Corner,
+) {
 	switch symbol {
 	case .C:
-		edge = apply_C(ds, tip)
+		edge = apply_C(wz, tip)
 	case .L:
-		edge = apply_L(ds, tip)
+		edge = apply_L(wz, tip)
 	case .R:
-		edge = apply_R(ds, tip)
+		edge = apply_R(wz, tip)
 	case .S:
-		edge = apply_S(ds, tip)
+		edge = apply_S(wz, tip)
 	case .E:
-		edge = apply_E(ds, tip)
+		edge = apply_E(wz, tip)
 	}
 	return edge
 }
 
 // new vertex, left is open, return right
-apply_C :: proc(ds: ^Decoder_State, tip: ct.Corner) -> ct.Corner {
-	set_free(ds.t, left_edge(tip), FREE_LEFT)
-	ds.t.c2v[tip] = reserve_vertex_id(ds)
+apply_C :: proc(wz: ^Wrap_a_Zip_State, tip: ct.Corner) -> ct.Corner {
+	set_free(wz.t, left_edge(tip), FREE_LEFT)
+	wz.t.c2v[tip] = reserve_vertex_id(wz)
 	return right_edge(tip)
 }
 // left triangle already exists, close it (zip), continue right
-apply_L :: proc(ds: ^Decoder_State, tip: ct.Corner) -> ct.Corner {
-	set_free(ds.t, left_edge(tip), FREE_RIGHT)
-	zip_if_free_right(ds, left_edge(tip))
+apply_L :: proc(wz: ^Wrap_a_Zip_State, tip: ct.Corner) -> ct.Corner {
+	set_free(wz.t, left_edge(tip), FREE_RIGHT)
+	zip_if_free_right(wz, left_edge(tip))
 	return right_edge(tip)
 }
 // right triangle already exists, continue left
-apply_R :: proc(ds: ^Decoder_State, tip: ct.Corner) -> ct.Corner {
-	set_free(ds.t, right_edge(tip), FREE_RIGHT)
+apply_R :: proc(wz: ^Wrap_a_Zip_State, tip: ct.Corner) -> ct.Corner {
+	set_free(wz.t, right_edge(tip), FREE_RIGHT)
 	return left_edge(tip)
 }
 // split: push left, return right
-apply_S :: proc(ds: ^Decoder_State, tip: ct.Corner) -> ct.Corner {
-	push_gate(ds, left_edge(tip))
+apply_S :: proc(wz: ^Wrap_a_Zip_State, tip: ct.Corner) -> ct.Corner {
+	push_gate(wz, left_edge(tip))
 	return right_edge(tip)
 }
 // end: close sides, zip, pop gate_stack
-apply_E :: proc(ds: ^Decoder_State, tip: ct.Corner) -> ct.Corner {
+apply_E :: proc(wz: ^Wrap_a_Zip_State, tip: ct.Corner) -> ct.Corner {
 	l := left_edge(tip)
 	r := right_edge(tip)
-	set_free(ds.t, r, FREE_RIGHT)
-	set_free(ds.t, l, FREE_RIGHT)
-	zip_if_free_right(ds, l) // might be no-op if was previously glued
-	zip_if_free_right(ds, r) // might be no-op if l was zipped
-	return pop_unlinked_gate(ds)
+	set_free(wz.t, r, FREE_RIGHT)
+	set_free(wz.t, l, FREE_RIGHT)
+	zip_if_free_right(wz, l) // might be no-op if was previously glued
+	zip_if_free_right(wz, r) // might be no-op if l was zipped
+	return pop_unlinked_gate(wz)
 }
 
 /*
@@ -357,41 +314,40 @@ Check everything:
 a) is a hole? if so, reserve
 b) is arrival? if so, glue & try zip
 */
-glue_triangle :: proc(ds: ^Decoder_State, tip: ct.Corner) {
-	reserve_hole_vertices(ds, tip)
-	glue_side(ds, side_corner(tip, .RIGHT))
-	glue_side(ds, side_corner(tip, .LEFT))
+glue_triangle :: proc(wz: ^Wrap_a_Zip_State, tip: ct.Corner) {
+	reserve_hole_vertices(wz, tip)
+	glue_side(wz, side_corner(tip, .RIGHT))
+	glue_side(wz, side_corner(tip, .LEFT))
 }
 
 /*
 If tip is on hole: reserve vertices (assigned in finish_component)
 */
-reserve_hole_vertices :: proc(ds: ^Decoder_State, tip: ct.Corner) {
-	n, is_hole := ds.holes[tip]
+reserve_hole_vertices :: proc(wz: ^Wrap_a_Zip_State, tip: ct.Corner) {
+	n, is_hole := wz.holes[tip]
 	if !is_hole {return}
 
-	first := reserve_vertex_ids(ds, n)
-	ds.t.c2v[tip] = first
-	append(&ds.pending_holes, Pending_Hole{tip = tip, first = first, len = n})
+	first := reserve_vertex_ids(wz, n)
+	wz.t.c2v[tip] = first
+	append(&wz.pending_holes, Pending_Hole{tip = tip, first = first, len = n})
 }
 
 /*
 If corner is arrival corner, glue it - and try to zip.
 */
-glue_side :: proc(ds: ^Decoder_State, corner: ct.Corner) {
-	t := ds.t
+glue_side :: proc(wz: ^Wrap_a_Zip_State, corner: ct.Corner) {
+	t := wz.t
 
-	s_left, is_arrival := ds.glues[corner]
+	s_left, is_arrival := wz.glues[corner]
 	if !is_arrival {return}
 
-	t.op[corner] = s_left
-	t.op[s_left] = corner
+	glue_corners(wz.t, s_left, corner)
 
 	unify_vertices(t, next(corner), prev(s_left))
 	unify_vertices(t, prev(corner), next(s_left))
 
 	zippi := zip_next(t^, ct.INVALID_CORNER, corner)
-	zip_if_free_right(ds, zippi)
+	zip_if_free_right(wz, zippi)
 }
 
 /*
@@ -410,18 +366,18 @@ unify_vertices :: proc(t: ^ct.Corner_Table, a, b: ct.Corner) {
 }
 
 finish_component :: proc(
-	ds: ^Decoder_State,
+	wz: ^Wrap_a_Zip_State,
 	start: ct.Corner,
 	first_vertex: ct.Vertex,
 	comp: Component_Info,
 ) {
-	for h in ds.pending_holes {
-		set_border(ds.t, h.tip, h.first, h.len)
+	for h in wz.pending_holes {
+		set_border(wz.t, h.tip, h.first, h.len)
 	}
-	clear(&ds.pending_holes)
+	clear(&wz.pending_holes)
 
 	if comp.outer_boundary > 0 {
-		set_border(ds.t, gate_start(start), first_vertex, comp.outer_boundary)
+		set_border(wz.t, gate_start(start), first_vertex, comp.outer_boundary)
 	}
 }
 
@@ -430,15 +386,15 @@ finish_component :: proc(
 /*
 Zip only if a waiting pair from right exists. (avoids already glued edges)
 */
-zip_if_free_right :: proc(ds: ^Decoder_State, edge: ct.Corner) {
-	if ds.t.op[edge] == FREE_RIGHT {zip(ds, edge)}
+zip_if_free_right :: proc(wz: ^Wrap_a_Zip_State, edge: ct.Corner) {
+	if wz.t.op[edge] == FREE_RIGHT {zip(wz, edge)}
 }
 
 /*
 Link the FREE-R edge (c)with FREE-L waiting pair, then continue if possible.
 */
-zip :: proc(ds: ^Decoder_State, c: ct.Corner) {
-	t := ds.t
+zip :: proc(wz: ^Wrap_a_Zip_State, c: ct.Corner) {
+	t := wz.t
 	c := c
 
 	for t.op[c] == FREE_RIGHT {
@@ -501,310 +457,81 @@ zip_next :: proc(t: ct.Corner_Table, b, c: ct.Corner) -> ct.Corner {
 /*
 not linked edge = border. fill t.v2c and assert nothing unresolved
 */
-finalize_corner_table :: proc(ds: ^Decoder_State, loc := #caller_location) {
-	t := ds.t
+finalize_corner_table :: proc(wz: ^Wrap_a_Zip_State, loc := #caller_location) {
+	t := wz.t
 
 	for &o in t.op {
 		if o < 0 {o = ct.INVALID_CORNER}
 	}
 
-	resize(&t.v2c, len(t.pos), loc)
-	slice.fill(t.v2c[:], ct.INVALID_CORNER)
-
-	for c in 0 ..< len(t.c2v) {
-		v := t.c2v[c]
-		assert(v != ct.INVALID_VERTEX, "unresolved corner")
-		t.v2c[v] = ct.Corner(c)
-	}
-
-	for c in t.v2c {
-		assert(c != ct.INVALID_CORNER, "unresolved vertex")
-	}
-}
-
-@(disabled = ODIN_DISABLE_ASSERT)
-assert_corner_table_consistent :: proc(t: ct.Corner_Table) {
-	for i in 0 ..< len(t.op) {
-		c := ct.Corner(i)
-		o := t.op[c]
-		if o == ct.INVALID_CORNER {continue}
-
-		assert(t.op[o] == c, "op is not symmetric")
-		assert(t.c2v[next(c)] == t.c2v[prev(o)], "shared edge: start vertices differ")
-		assert(t.c2v[prev(c)] == t.c2v[next(o)], "shared edge: end vertices differ")
-	}
-}
-
-/**************************** PASS 2: GEOMETRY ********************************/
-
-/*
-Decode geometry of one component.
-*/
-decode_component_geometry :: proc(ds: ^Decoder_State, start: ct.Corner, comp: Component_Info) {
-	decode_gate_vertices(ds, start, comp.outer_boundary > 0)
-	decode_geometry_triangles(ds, start)
-}
-
-/*
-Decode first vertices in component, different for boundary&closed component.
-*/
-decode_gate_vertices :: proc(ds: ^Decoder_State, tip: ct.Corner, has_boundary: bool) {
-	t := ds.t
-	gs_c := gate_start(tip)
-	gs := ct.c2v(t^, gs_c)
-
-	t.pos[gs] = read_vertex(ds)
-	ds.vertex_done[gs] = true
-
-	if has_boundary {
-		decode_hole_vertices(ds, gs_c)
-	} else {
-		ge := ct.c2v(t^, gate_end(tip))
-		t.pos[ge] = ds.vtx_codec.decode_loop(t.pos[gs], read_vertex(ds))
-		ds.vertex_done[ge] = true
-	}
-}
-
-decode_geometry_triangles :: proc(ds: ^Decoder_State, start: ct.Corner) {
-	t := ds.t^
-	assert(len(ds.gate_stack) == 0, "gate stack must be empty between components")
-
-	gate := start
-	for gate != ct.INVALID_CORNER {
-		ds.tri_done[ct.c2t(gate)] = true
-
-		// symbol must be decided before tip is decoded (known vs not)
-		symbol := geometry_symbol(ds, gate)
-		decode_tip_vertex(ds, gate)
-
-		switch symbol {
-		case .C, .L:
-			gate = ct.right_of(t, gate)
-		case .R:
-			gate = ct.left_of(t, gate)
-		case .S:
-			push_gate(ds, ct.left_of(t, gate))
-			gate = ct.right_of(t, gate)
-		case .E:
-			gate = pop_undecoded_gate(ds)
-		}
-	}
-}
-
-/*
-Is exactly the same decision as in encoder decide_clers.
-*/
-geometry_symbol :: proc(ds: ^Decoder_State, gate: ct.Corner) -> Operation {
-	t := ds.t^
-
-	tip_is_new := !ds.vertex_done[ct.c2v(t, gate)] && !ct.border_c(t, gate)
-	right_done := neighbour_done(ds^, ct.right_of(t, gate))
-	left_done := neighbour_done(ds^, ct.left_of(t, gate))
-
-	return clers_symbol(tip_is_new, right_done, left_done)
-}
-
-// border = also done
-neighbour_done :: proc(ds: Decoder_State, c: ct.Corner) -> bool {
-	return c == ct.INVALID_CORNER || ds.tri_done[ct.c2t(c)]
-}
-
-/*
-Decode the tip vertex position if tip is new.
-
-Encoder brother = smart_vertex_emit
-*/
-decode_tip_vertex :: proc(ds: ^Decoder_State, gate: ct.Corner) {
-	t := ds.t
-	v := ct.c2v(t^, gate)
-	if ds.vertex_done[v] {return}
-
-	if tip_prediction_available(ds^, gate) {
-		ctx := vertex_codec_context(t^, gate)
-		t.pos[v] = ds.vtx_codec.decode_tip(ctx, read_vertex(ds))
-	} else {
-		ge := ct.c2v(t^, gate_end(gate))
-		t.pos[v] = ds.vtx_codec.decode_loop(t.pos[ge], read_vertex(ds))
-	}
-	ds.vertex_done[v] = true
-
-	if ct.border_c(t^, gate) {
-		decode_hole_vertices(ds, gate)
-	}
-}
-
-// the op vtx to gate exists & is decoded
-tip_prediction_available :: proc(ds: Decoder_State, gate: ct.Corner) -> bool {
-	o := ct.op(ds.t^, gate)
-	return o != ct.INVALID_CORNER && ds.vertex_done[ct.c2v(ds.t^, o)]
-}
-
-decode_hole_vertices :: proc(ds: ^Decoder_State, c: ct.Corner) {
-	t := ds.t
-	initial := ct.c2v(t^, c)
-	curr := c
-
-	for {
-		n, found := ct.next_on_border(t^, curr)
-		assert(found, "border walk left the border...")
-
-		v := ct.c2v(t^, n)
-		if v == initial {return} 	// the loop has endeth
-
-		prev_pos := t.pos[ct.c2v(t^, curr)]
-		t.pos[v] = ds.vtx_codec.decode_loop(prev_pos, read_vertex(ds))
-		ds.vertex_done[v] = true
-
-		curr = n
-	}
+	fill_v2c(t, loc)
 }
 
 /****************************** Helpers ***************************************/
 
 exist :: #force_inline proc(c: ct.Corner) -> bool {return c >= 0}
 
-read_symbol :: proc(ds: ^Decoder_State) -> Operation {
-	assert(ds.sym_pos < len(ds.symbols), "ran out of symbols")
-	s := ds.symbols[ds.sym_pos]
-	ds.sym_pos += 1
+read_symbol :: proc(wz: ^Wrap_a_Zip_State) -> Operation {
+	assert(wz.sym_pos < len(wz.symbols), "ran out of symbols")
+	s := wz.symbols[wz.sym_pos]
+	wz.sym_pos += 1
 	return s
 }
 
-read_vertex :: proc(ds: ^Decoder_State) -> Vector3 {
-	assert(ds.vtx_pos < len(ds.vertices), "ran out of vertices")
-	v := ds.vertices[ds.vtx_pos]
-	ds.vtx_pos += 1
-	return v
-}
-
-reserve_vertex_id :: proc(ds: ^Decoder_State) -> ct.Vertex {
-	ds.last_vertex += 1
-	return ds.last_vertex
+reserve_vertex_id :: proc(wz: ^Wrap_a_Zip_State) -> ct.Vertex {
+	wz.last_vertex += 1
+	return wz.last_vertex
 }
 
 // return the first id
-reserve_vertex_ids :: proc(ds: ^Decoder_State, n: int) -> ct.Vertex {
-	first := ds.last_vertex + 1
-	ds.last_vertex += ct.Vertex(n)
+reserve_vertex_ids :: proc(wz: ^Wrap_a_Zip_State, n: int) -> ct.Vertex {
+	first := wz.last_vertex + 1
+	wz.last_vertex += ct.Vertex(n)
 	return first
 }
 
 // tip of new (next) triangle
-peek_next_tip :: proc(ds: Decoder_State) -> ct.Corner {
-	return ct.Corner(3 * (ds.last_tri + 1))
+peek_next_tip :: proc(wz: Wrap_a_Zip_State) -> ct.Corner {
+	return ct.Corner(3 * (wz.last_tri + 1))
 }
 
 // count a new triangle, return tip
-new_triangle :: proc(ds: ^Decoder_State) -> ct.Corner {
-	tip := peek_next_tip(ds^)
-	ds.last_tri += 1
+new_triangle :: proc(wz: ^Wrap_a_Zip_State) -> ct.Corner {
+	tip := peek_next_tip(wz^)
+	wz.last_tri += 1
 	return tip
 }
 
 /*
-Pushes gate to ds.gate_stack.
+Pushes gate to wz.gate_stack.
 */
-push_gate :: #force_inline proc(ds: ^Decoder_State, gate: ct.Corner) {
-	append(&ds.gate_stack, Gate(gate))
+push_gate :: #force_inline proc(wz: ^Wrap_a_Zip_State, gate: ct.Corner) {
+	append(&wz.gate_stack, Gate(gate))
 }
 
 /*
 Pop gate stack until not linked gate is found.
 */
-pop_unlinked_gate :: #force_inline proc(ds: ^Decoder_State) -> ct.Corner {
-	for len(ds.gate_stack) > 0 {
-		candidate := ct.Corner(pop(&ds.gate_stack))
+pop_unlinked_gate :: #force_inline proc(wz: ^Wrap_a_Zip_State) -> ct.Corner {
+	for len(wz.gate_stack) > 0 {
+		candidate := ct.Corner(pop(&wz.gate_stack))
 
-		if !exist(ds.t.op[candidate]) {return candidate}
+		if !exist(wz.t.op[candidate]) {return candidate}
 	}
 	return ct.INVALID_CORNER
 }
 
-pop_undecoded_gate :: proc(ds: ^Decoder_State) -> ct.Corner {
-	for len(ds.gate_stack) > 0 {
-		candidate := ct.Corner(pop(&ds.gate_stack))
-
-		if !ds.tri_done[ct.c2t(candidate)] {return candidate}
-	}
-	return ct.INVALID_CORNER
-}
-
+/***************************** Asserts ****************************************/
 
 /*
-Set all corners around v to have its c2v point to v. The corner c must be
-adjacent to vertex v.
-*/
-set_ring :: proc(t: ^ct.Corner_Table, c: ct.Corner, v: ct.Vertex) {
-	start, has_border := ct.rightmost(t^, c)
-	if !has_border {start = c}
-
-	curr := start
-	for step := 0;; step += 1 {
-		assert(step < len(t.pos), "Neighbours of vertex must be less than total # of vertices.")
-		t.c2v[curr] = v
-
-		next := ct.left(t^, curr)
-		if next == start || next < 0 {break} 	// done full circle
-		curr = next
-	}
-}
-
-/*
-Set border vertices to start from initial and increase by one each step.
-*/
-set_border :: proc(t: ^ct.Corner_Table, c: ct.Corner, initial: ct.Vertex, count: int) {
-	current := c
-
-	for i in 0 ..< count {
-		set_ring(t, current, initial + ct.Vertex(i))
-
-		next, found := ct.next_on_border(t^, current)
-		assert(found, "border walk")
-
-		current = next
-	}
-
-	r0, _ := ct.rightmost(t^, c)
-	r1, _ := ct.rightmost(t^, current)
-
-	assert(
-		r0 == r1,
-		fmt.tprintf(
-			"border walk must be closed, v0 = %v, v1 = %v, c0 = %v, c1 = %v",
-			t.c2v[r0],
-			t.c2v[r1],
-			c,
-			current,
-		),
-	)
-}
-
-/*
-After component is done, assert that it has as many border edges as it should
-(known in component info).
+Component must have as many border edges as outer boundary + all holes.
 */
 @(disabled = ODIN_DISABLE_ASSERT)
-assert_border_edges_count :: proc(
-	ds: Decoder_State,
-	comp: Component_Info,
-	first_tri, last_tri: int,
-) {
-	expected := comp.outer_boundary
-	for h in ds.pending_holes {
-		expected += h.len
+assert_component_border_edges :: proc(wz: Wrap_a_Zip_State, first, end: int) {
+	expected := 0
+	for ph in wz.pending_holes {
+		expected += ph.len
 	}
 
-	// count all boundary edges = nonexistent opposite corners
-	actual := 0
-	for i in 3 * first_tri ..< 3 * last_tri {
-		op := ds.t.op[ct.Corner(i)]
-		if !exist(op) {
-			actual += 1
-		}
-	}
-
-	assert(
-		actual == expected,
-		fmt.tprintf("boundary edge count mismatch: expected %v, got %v", expected, actual),
-	)
+	assert_border_edges_count(wz.t^, first, end, expected)
 }
