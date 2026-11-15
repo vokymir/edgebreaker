@@ -1,6 +1,5 @@
 package corner_table
 
-import "core:log"
 Vec3 :: [3]f32
 
 Corner :: distinct int
