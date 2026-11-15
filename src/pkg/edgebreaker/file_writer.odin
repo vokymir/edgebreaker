@@ -8,6 +8,7 @@ import "core:strings"
 
 @(private)
 write_file_binary :: proc(em: Encoded_Mesh, filename: string) -> bool {
+	// TODO: impl
 	return false
 }
 

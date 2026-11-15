@@ -10,6 +10,7 @@ import "core:strings"
 
 @(private)
 read_file_binary :: proc(filename: string) -> ^Encoded_Mesh {
+	// TODO: impl
 	return nil
 }
 
