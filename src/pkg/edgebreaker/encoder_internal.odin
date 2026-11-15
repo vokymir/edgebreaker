@@ -1,10 +1,5 @@
 #+private file
 package edgebreaker
-/*******************************************************************************
-TODO                                                                        TODO
-       DELETE THE DEBUG STRUCT FROM ENCODED_MESH & EVERYWHERE IT IS USED
-TODO                                                                        TODO
-*******************************************************************************/
 
 import ct "../corner_table"
 import "base:runtime"
@@ -112,9 +107,6 @@ compress_internal :: proc(
 	init_em(em, len(t.c2v) / 3, len(t.pos), allocator, loc)
 	em.vertex_codec = es.vertex_codec.kind
 	es.em = em
-	// TODO: causes leak (the tri_map)
-	em.debug.original = t // TODO: debug
-	em.debug.tri_map = make([]int, len(t.c2v) / 3, allocator, loc) // TODO: debug
 
 	mark_all_holes(&es, t)
 
@@ -429,7 +421,6 @@ tri_step :: #force_inline proc(
 	loc := #caller_location,
 ) {
 	es.tri_step[ct.c2t(gate)] = step
-	es.em.debug.tri_map[step - 1] = int(ct.c2t(gate)) // TODO: debug
 	log.debug("triangle", ct.c2t(gate), "step set to", step, location = loc)
 }
 
