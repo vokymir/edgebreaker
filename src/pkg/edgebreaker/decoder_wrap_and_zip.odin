@@ -140,7 +140,7 @@ decode_component_connectivity :: proc(wz: ^Wrap_a_Zip_State, comp: Component_Inf
 	decode_component_triangles(wz, start)
 	last_tri := int(wz.last_tri + 1)
 
-	assert_component_border_edges(wz^, first_tri, last_tri)
+	assert_component_border_edges(wz^, first_tri, last_tri, comp)
 	finish_component(wz, start, first_vertex, comp)
 
 	return start
@@ -527,8 +527,12 @@ pop_unlinked_gate :: #force_inline proc(wz: ^Wrap_a_Zip_State) -> ct.Corner {
 Component must have as many border edges as outer boundary + all holes.
 */
 @(disabled = ODIN_DISABLE_ASSERT)
-assert_component_border_edges :: proc(wz: Wrap_a_Zip_State, first, end: int) {
-	expected := 0
+assert_component_border_edges :: proc(
+	wz: Wrap_a_Zip_State,
+	first, end: int,
+	comp: Component_Info,
+) {
+	expected := comp.outer_boundary
 	for ph in wz.pending_holes {
 		expected += ph.len
 	}
