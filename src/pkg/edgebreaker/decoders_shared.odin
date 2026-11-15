@@ -87,6 +87,11 @@ destroy_dgs :: proc(dgs: ^Decoder_Geometry_State, loc := #caller_location) {
 }
 
 /*************************** Geometry Pass In The Whole ***********************/
+/*
+Natural in Wrap&Zip.
+For Spirale Reversi, the vertex ordering is not changed, so it also has to do
+second (not reversed) pass and can reuse this.
+*/
 
 /*
 Decode geometry of all components.

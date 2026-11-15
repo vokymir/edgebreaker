@@ -1,9 +1,8 @@
+#+private
 package edgebreaker
 
 import ct "../corner_table"
 import "core:log"
-
-Vector3 :: ct.Vec3
 
 /********************************* Possible codecs ****************************/
 
@@ -43,25 +42,6 @@ Vertex_Codec_Parallelogram :: Vertex_Codec {
 	decode_loop = delta_decode,
 }
 
-/*
-Human readable description of every codec for CLI.
-*/
-vertex_codec_info :: proc(k: Vertex_Codec_Kind) -> Vertex_Codec_Info {
-	switch k {
-	case .RAW:
-		return {
-			summary = "absolute positions, no prediction",
-			notes = "Every position is stored as is. Baseline. Good for debugging. Nothing is gained from the mesh regularity.",
-		}
-	case .DELTA_PARALLELOGRAM:
-		return {
-			summary = "parallelogram prediction inside, delta on boundaries and holes",
-			notes = "Interior vertices store the error of the parallelogram prediction (gs + ge - opposite), boundary vertices store the difference to the previous one. Best on smooth meshes.",
-		}
-	}
-	return {}
-}
-
 /********************** Shared synchronization proc ***************************/
 
 /*
@@ -92,16 +72,6 @@ vertex_codec_context :: proc(t: ct.Corner_Table, c: ct.Corner) -> Tip_Context {
 
 /**************************** Structs *****************************************/
 
-Vertex_Codec_Kind :: enum u8 {
-	RAW, // absolute positions
-	DELTA_PARALLELOGRAM, // delta on loops, parallelogram on tips
-}
-
-Vertex_Codec_Info :: struct {
-	summary: string,
-	notes:   string,
-}
-
 /*
 Context of tip (gate corner). 
 SHOULD be created via corresponding procedure vertex_codec_context().
@@ -129,12 +99,10 @@ Vertex_Codec :: struct {
 Always predict {0,0,0} therefore the correction/delta must be the absolute 
 vertex position.
 */
-@(private = "file")
 raw_tip :: proc(_: Tip_Context, pos: Vector3) -> Vector3 {
 	return pos
 }
 
-@(private = "file")
 raw_loop :: proc(_, pos: Vector3) -> Vector3 {
 	return pos
 }
@@ -145,12 +113,10 @@ raw_loop :: proc(_, pos: Vector3) -> Vector3 {
 Delta encoding does simply only encode the difference (delta) between two
 points.
 */
-@(private = "file")
 delta_encode :: proc(prev, pos: Vector3) -> Vector3 {
 	return pos - prev
 }
 
-@(private = "file")
 delta_decode :: proc(prev, residual: Vector3) -> Vector3 {
 	return prev + residual
 }
@@ -173,12 +139,10 @@ newly found v)
 Returns:
 - Vector3: the CORRECTION of vertex v
 */
-@(private = "file")
 parallelogram_encode :: proc(ctx: Tip_Context, pos: Vector3) -> Vector3 {
 	return (ctx.gate_start + ctx.gate_end - ctx.opposite) - pos
 }
 
-@(private = "file")
 parallelogram_decode :: proc(ctx: Tip_Context, residual: Vector3) -> Vector3 {
 	return (ctx.gate_start + ctx.gate_end - ctx.opposite) - residual
 }

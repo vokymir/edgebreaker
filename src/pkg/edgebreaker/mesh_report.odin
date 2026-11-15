@@ -1,3 +1,4 @@
+#+private
 package edgebreaker
 
 import ct "../corner_table"
