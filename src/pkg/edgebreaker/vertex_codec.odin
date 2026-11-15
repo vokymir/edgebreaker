@@ -43,6 +43,25 @@ Vertex_Codec_Parallelogram :: Vertex_Codec {
 	decode_loop = delta_decode,
 }
 
+/*
+Human readable description of every codec for CLI.
+*/
+vertex_codec_info :: proc(k: Vertex_Codec_Kind) -> Vertex_Codec_Info {
+	switch k {
+	case .RAW:
+		return {
+			summary = "absolute positions, no prediction",
+			notes = "Every position is stored as is. Baseline. Good for debugging. Nothing is gained from the mesh regularity.",
+		}
+	case .DELTA_PARALLELOGRAM:
+		return {
+			summary = "parallelogram prediction inside, delta on boundaries and holes",
+			notes = "Interior vertices store the error of the parallelogram prediction (gs + ge - opposite), boundary vertices store the difference to the previous one. Best on smooth meshes.",
+		}
+	}
+	return {}
+}
+
 /********************** Shared synchronization proc ***************************/
 
 /*
@@ -76,6 +95,11 @@ vertex_codec_context :: proc(t: ct.Corner_Table, c: ct.Corner) -> Tip_Context {
 Vertex_Codec_Kind :: enum u8 {
 	RAW, // absolute positions
 	DELTA_PARALLELOGRAM, // delta on loops, parallelogram on tips
+}
+
+Vertex_Codec_Info :: struct {
+	summary: string,
+	notes:   string,
 }
 
 /*

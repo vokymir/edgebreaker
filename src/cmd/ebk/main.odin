@@ -28,9 +28,13 @@ Options :: struct {
 	input:        string `args:"pos=0" usage:"Input file to (de)compress,
   supported formats can be view via -formats."`,
 	output:       string `args:"name=out" usage:"Optional output file path."`,
-	vertex_codec: eb.Vertex_Codec_Kind `args:"name=codec" usage:"Optional vertex codec selection.
+	vertex_codec: eb.Vertex_Codec_Kind `args:"name=codec" usage:"Optional vertex codec selection, see -codecs.
   (only for compression, in .ebk file the codec is already selected.)"`,
+	decoder:      eb.Decoder_Kind `args:"name=decoder" usage:"Optional decoder selection, see -decoders.
+  (only for decompression.)"`,
 	formats:      bool `args:"name=formats" usage:"List supported file formats."`,
+	codecs:       bool `args:"name=codecs" usage:"List available vertex codecs."`,
+	decoders:     bool `args:"name=decoders" usage:"List available decoders."`,
 }
 
 /******************************** PROCS ***************************************/
@@ -67,8 +71,10 @@ main :: proc() {
 }
 
 validate_options :: proc(opt: ^Options) -> Error {
-	if opt.formats { 	// user wants to know about formats
-		print_formats()
+	if opt.formats || opt.codecs || opt.decoders { 	// user wants to know about something
+		if opt.formats {print_formats()}
+		if opt.codecs {print_codecs()}
+		if opt.decoders {print_decoders()}
 		return .DONE
 	}
 
@@ -111,6 +117,56 @@ validate_options :: proc(opt: ^Options) -> Error {
 	return .OK
 }
 
+/************************************ INFO PRINTS *****************************/
+
+print_formats :: proc() {
+	fmt.println("Supported formats:")
+	fmt.println("")
+
+	fmt.printf("  %-14s %-38s %-10s %s\n", "EXTENSION", "DESCRIPTION", "OPERATION", "DEFAULT PAIR")
+
+	fmt.printf("  %s\n", strings.repeat("-", 78))
+
+	for format in Format {
+		info := format_info(format)
+
+		operation := "Decode"
+		if info.operation_encode {
+			operation = "Encode"
+		}
+
+		pair := format_extension(info.default_pair)
+
+		fmt.printf("  %-14s %-38s %-10s %s\n", info.extension, info.description, operation, pair)
+	}
+}
+
+print_codecs :: proc() {
+	fmt.println("Vertex codecs (-codec <name>, compression only):")
+	for kind in eb.Vertex_Codec_Kind {
+		info := eb.vertex_codec_info(kind)
+		is_default := kind == eb.Vertex_Codec_Kind(0)
+
+		fmt.printfln("  %v%s", kind, " (default)" if is_default else "")
+		fmt.printfln("      %s", info.summary)
+		fmt.printfln("      %s", info.notes)
+	}
+}
+
+print_decoders :: proc() {
+	fmt.println("Decoders (-decoder <name>, decompression only):")
+	for kind in eb.Decoder_Kind {
+		info := eb.decoder_info(kind)
+		is_default := kind == eb.Decoder_Kind(0)
+
+		fmt.printfln("  %v%s", kind, " (default)" if is_default else "")
+		fmt.printfln("      %s", info.summary)
+		fmt.printfln("      %s", info.notes)
+	}
+}
+
+/********************************* ACTUAL HANDLERS ****************************/
+
 handle_encode :: proc(opt: Options) -> Error {
 	table: ct.Corner_Table
 	ct.init(&table)
@@ -147,7 +203,7 @@ handle_decode :: proc(opt: Options) -> Error {
 	ct.init(&table)
 	defer ct.destroy(&table)
 
-	eb.decode(em^, &table)
+	eb.decode(em^, &table, opt.decoder)
 
 	ok = ct.save(table, opt.output)
 	if !ok {
