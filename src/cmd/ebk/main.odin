@@ -177,7 +177,7 @@ handle_encode :: proc(opt: Options) -> Error {
 		return .CANNOT_LOAD_FILE
 	}
 
-	em, ok := eb.compress(table, eb.vertex_codec_of(opt.vertex_codec))
+	em, ok := eb.compress(table, opt.vertex_codec)
 	if !ok {
 		log.fatal("compression failed")
 		return .COMPRESSION_FAILED
@@ -203,7 +203,7 @@ handle_decode :: proc(opt: Options) -> Error {
 	ct.init(&table)
 	defer ct.destroy(&table)
 
-	eb.decode(em^, &table, opt.decoder)
+	eb.decompress(em^, &table, opt.decoder)
 
 	ok = ct.save(table, opt.output)
 	if !ok {
