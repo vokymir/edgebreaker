@@ -6,6 +6,9 @@
 !assets/*.obj
 !assets/**/*.obj
 
+# ignore all new assets (don't want to ship gigabytes of assets in git)
+assets/
+
 # since I do not compile into build/ dir, I need to ignore all binaries
 ebk/ebk
 ebk-vis/ebk-vis
