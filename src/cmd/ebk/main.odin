@@ -63,7 +63,7 @@ main :: proc() {
 	case .OBJ:
 		handle_encode(opt)
 	case .EBK:
-		panic("not implemented yet")
+		fallthrough
 	// fallthrough // use here after is implemented
 	case .SIMPLE_EBK:
 		handle_decode(opt)
