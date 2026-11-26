@@ -18,7 +18,8 @@ Error :: enum {
 	Write_Failed, // output file could not be written
 	Unsupported_Format, // unknown file extension
 	Truncated, // file ends before its own headers/counts say it should
-	Bad_Header, // header pointer outside the file
+	Bad_Header, // header pointer outside the file: not an STX at all, or corrupt
+	No_Geometry, // a valid STX that simply contains no 3D data (metadata and thumbnail only)
 	No_Buffer_Data, // pointer does not lead to a geometry block
 	No_Matching_Buffer, // no geometry buffer has the requested level
 	Corrupt, // negative count or similar nonsense
@@ -39,9 +40,11 @@ error_message :: proc(e: Error) -> string {
 	case .Truncated:
 		return "file is truncated"
 	case .Bad_Header:
-		return "header points outside the file"
+		return "header pointer lies outside the file (not an STX file, or corrupt)"
+	case .No_Geometry:
+		return "file contains no 3D geometry (header geometry pointer is 0)"
 	case .No_Buffer_Data:
-		return "header does not lead to a geometry block"
+		return "header pointer does not lead to a geometry block (corrupt file)"
 	case .No_Matching_Buffer:
 		return "no geometry buffer has the requested level (use --list to see what the file contains)"
 	case .Corrupt:

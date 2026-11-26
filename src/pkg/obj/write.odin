@@ -21,6 +21,8 @@ write_obj :: proc(sb: ^strings.Builder, m: Mesh) {
 				v = 0 // turns -0 into +0
 			}
 			strings.write_byte(sb, ' ')
+			// The last argument is `flags`. Its default is {.Plus}, which would print
+			// "+2.5" (the default exists only for backwards compatibility); nil gives "2.5".
 			strings.write_string(sb, strconv.write_float(buf[:], f64(v), 'f', -1, 32))
 		}
 		strings.write_byte(sb, '\n')

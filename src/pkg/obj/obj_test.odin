@@ -118,6 +118,17 @@ expect_error :: proc(t: ^testing.T, data: []byte, opts: Options, expected: Error
 // ---------------------------------------------------------------------------------------
 // Shared fixtures
 
+// Real files from the project's data set (testdata/). The STX is a washer: after welding a
+// closed, consistently oriented genus-1 mesh with 366 vertices and 732 triangles. The OBJ next
+// to it was produced by an independent decoder/formatter, not by this package.
+@(private = "file")
+REAL_STX :: #load("testdata/000000_1_3D.STX")
+@(private = "file")
+REAL_OBJ :: #load("testdata/000000_1_3D.obj", string)
+// A valid STX that holds only metadata and a JPEG thumbnail: header pointer is 0.
+@(private = "file")
+THUMBNAIL_ONLY_STX :: #load("testdata/601982_1_3D.STX")
+
 @(private = "file")
 TET_POSITIONS := [][3]f32{{0, 0, 0}, {1, 0, 0}, {0, 1, 0}, {0, 0, 1}}
 @(private = "file")
@@ -327,6 +338,55 @@ stx_rejects_bad_files :: proc(t: ^testing.T) {
 		defer delete(data)
 		expect_error(t, data, Options{}, .Non_Finite)
 	}
+}
+
+@(test)
+real_file_converts_to_the_expected_obj :: proc(t: ^testing.T) {
+	expect_obj(t, REAL_STX, Options{}, REAL_OBJ)
+}
+
+@(test)
+real_file_lists_both_buffers :: proc(t: ^testing.T) {
+	buffers, err := stx_scan(REAL_STX)
+	defer delete(buffers)
+	testing.expect_value(t, err, Error.None)
+	testing.expect_value(t, len(buffers), 2)
+	if len(buffers) == 2 {
+		testing.expect_value(t, buffers[0].level, f32(0.25))
+		testing.expect_value(t, buffers[0].vertex_count, 1364)
+		testing.expect_value(t, buffers[0].face_count, 726)
+		testing.expect_value(t, buffers[1].level, f32(1))
+		testing.expect_value(t, buffers[1].vertex_count, 1372)
+		testing.expect_value(t, buffers[1].face_count, 732)
+		testing.expect_value(t, buffers[1].narrow, true)
+	}
+}
+
+@(test)
+real_file_without_geometry_is_reported_as_such :: proc(t: ^testing.T) {
+	expect_error(t, THUMBNAIL_ONLY_STX, Options{}, .No_Geometry)
+}
+
+@(test)
+header_pointer_zero_means_no_geometry :: proc(t: ^testing.T) {
+	data := make([]byte, 64)
+	defer delete(data)
+	data[0], data[1], data[2] = 0x47, 0x60, 0x03 // version 0x00036047; both pointers stay 0
+	expect_error(t, data, Options{}, .No_Geometry)
+}
+
+@(test)
+file_that_is_not_an_stx_is_rejected :: proc(t: ^testing.T) {
+	// First 20 bytes of a real "STX" in the data set that was actually a fragment of a
+	// Windows driver binary: the header pointer decodes to a negative number.
+	head := [20]byte{
+		0x08, 0x49, 0x89, 0x85, 0x18, 0x01, 0x00, 0x00, 0xe9, 0xc7,
+		0xf3, 0xff, 0xff, 0x0b, 0xcb, 0x41, 0x89, 0x8d, 0xac, 0x01,
+	}
+	data := make([]byte, 256)
+	defer delete(data)
+	copy(data, head[:])
+	expect_error(t, data, Options{}, .Bad_Header)
 }
 
 @(test)

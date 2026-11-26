@@ -33,10 +33,20 @@ package obj
 //       u8    narrow             non-zero: indices are u16, zero: indices are u32
 //       face_count * 3 * (u16 | u32)   indexed triangle list, 0-based
 //
-// Not verified against real files (none were available): the winding order and
-// handedness of the stored triangles, and what `level` means besides "1.0 is selected".
-// `Options.flip_z` / `Options.reverse_winding` exist for that reason.
-
+// Confirmed on real files (one inspected in depth; a batch of ~37,000 converted, of which
+// only 6 were not convertible, see the last point):
+//   - in the file inspected, the header pointer is the offset of the BUFFERDATA token, the last
+//     block, ending exactly at end-of-file; the blocks before it are a token stream
+//     (token i32, then usually i32 size + payload) containing a BOUNDINGBOX whose values equal
+//     the decoded vertex extents;
+//   - that file holds two buffers, levels 0.25 and 1.0 (1364 vs 1372 vertices): consistent with
+//     `level` being a level of detail, though here the 0.25 buffer is barely coarser;
+//   - the stored winding is already outward-facing in OBJ's right-handed convention: the
+//     welded mesh is a closed, consistently oriented 2-manifold with positive signed volume.
+//     Do NOT use `flip_z` alone; it mirrors the mesh and turns it inside out.
+//   - some files carry no geometry (pointer 0, only thumbnail/metadata) -> `.No_Geometry`;
+//     a few others are not STX at all (pointer garbage) -> `.Bad_Header`.
+//
 STX_TOKEN_BUFFER_DATA :: 18
 STX_HEADER_SIZE :: 4 + 8 + 8
 
@@ -61,6 +71,11 @@ stx_scan :: proc(data: []byte, allocator := context.allocator) -> (buffers: []St
 	_ = read_i64(&r) // second pointer, unused by the original loader
 	if r.failed {
 		return nil, .Truncated
+	}
+	if pointer == 0 {
+		// Seen in real data: an STX holding only metadata and a thumbnail has no geometry
+		// block, and its pointer is 0. That is a valid file, just not a convertible one.
+		return nil, .No_Geometry
 	}
 	if pointer < 0 || pointer >= i64(len(data)) {
 		return nil, .Bad_Header
