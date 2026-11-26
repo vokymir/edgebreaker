@@ -10,8 +10,9 @@ import "core:strings"
 //
 // Coordinates are printed in the shortest decimal form that reads back as the exact
 // same float32, and never in exponent notation (hand-written OBJ parsers often choke on it).
+// Examples: 0   2.5   -11.99463   0.0000001   15000000000
 write_obj :: proc(sb: ^strings.Builder, m: Mesh) {
-	buf: [64]byte // longest possible f32 in positional form is ~48 characters
+	buf: [32]byte // a u32 index has at most 10 digits
 
 	for p in m.positions {
 		strings.write_byte(sb, 'v')
@@ -21,9 +22,10 @@ write_obj :: proc(sb: ^strings.Builder, m: Mesh) {
 				v = 0 // turns -0 into +0
 			}
 			strings.write_byte(sb, ' ')
-			// The last argument is `flags`. Its default is {.Plus}, which would print
-			// "+2.5" (the default exists only for backwards compatibility); nil gives "2.5".
-			strings.write_string(sb, strconv.write_float(buf[:], f64(v), 'f', -1, 32))
+			// strings.write_float writes straight into the builder and, unlike
+			// strconv.write_float (whose default flags are {.Plus}), prints "2.5", not "+2.5",
+			// because its `always_signed` parameter defaults to false.
+			strings.write_float(sb, f64(v), 'f', -1, 32)
 		}
 		strings.write_byte(sb, '\n')
 	}

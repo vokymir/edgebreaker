@@ -2,7 +2,10 @@ package obj
 
 // STX reader.
 //
-// STX has no public specification. The layout below was recovered by disassembling
+// STX has no public specification. STX_FORMAT.md (next to this file) is the full description,
+// with annotated hex dumps of a real file; this comment is the short version.
+//
+// The layout below was recovered by disassembling
 // StxLoader.dll (namespace Pdm.Loaders, built from "BlueView50 ... SharpDX") and then
 // checked by executing that DLL's own IL on synthetic files and comparing results.
 // Treat the DLL as the specification; where it ignores something, so do we.
@@ -23,7 +26,9 @@ package obj
 //     i32   block_size           (ignored)
 //     i32   buffer_count
 //     buffer_count times:
-//       i32   <unused>
+//       i32   byte_size          bytes that follow in this buffer, from `level` through the
+//                                last index (observed on real files; the loader ignores it,
+//                                and so do we)
 //       f32   level              the loader keeps the buffer whose level == 1.0
 //                                (inferred to be a level-of-detail value; if several
 //                                buffers carry 1.0, the last one wins)
@@ -103,7 +108,7 @@ stx_scan :: proc(data: []byte, allocator := context.allocator) -> (buffers: []St
 	for _ in 0 ..< int(count) {
 		b: Stx_Buffer
 
-		_ = read_i32(&r) // unused
+		_ = read_i32(&r) // byte_size of this buffer; the original loader ignores it
 		b.level = read_f32(&r)
 		vertex_count := read_i32(&r)
 		if r.failed {

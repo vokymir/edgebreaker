@@ -138,6 +138,21 @@ TET_TRIANGLES := [][3]u32{{0, 2, 1}, {0, 1, 3}, {1, 2, 3}, {0, 3, 2}}
 // Tests
 
 @(test)
+write_obj_prints_plain_numbers_without_plus_signs :: proc(t: ^testing.T) {
+	// Writer only, no STX involved: if this fails, the problem is in write_obj.
+	mesh := Mesh {
+		positions = [][3]f32{{1, 2.5, -3}, {0, 0.1, 100}},
+		triangles = [][3]u32{{0, 1, 0}},
+	}
+	sb: strings.Builder
+	strings.builder_init(&sb)
+	defer strings.builder_destroy(&sb)
+
+	write_obj(&sb, mesh)
+	testing.expect_value(t, strings.to_string(sb), "v 1 2.5 -3\nv 0 0.1 100\nf 1 2 1\n")
+}
+
+@(test)
 stx_tetrahedron_welded :: proc(t: ^testing.T) {
 	data := build_stx([]Test_Buffer{{level = 1, positions = TET_POSITIONS, triangles = TET_TRIANGLES, flag = 1}})
 	defer delete(data)
